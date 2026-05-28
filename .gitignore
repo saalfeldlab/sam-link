@@ -7,3 +7,5 @@ liver_cells/
 overlay.png
 segmentation.png
 test.png
+*.iml
+

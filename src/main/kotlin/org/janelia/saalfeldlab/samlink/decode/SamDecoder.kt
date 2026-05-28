@@ -141,7 +141,7 @@ class MaskPrompt(val mask: FloatArray) : SamPromptBase
  */
 enum class DecoderModel(val resourceName: String) {
     SAM1("sam_vit_h_4b8939.onnx"),
-    SAM2_LARGE("sam2.1_hiera_large_decoder.onnx"),
+    SAM2("sam2.1_hiera_large_decoder.onnx"),
     SAM3_TRACKER_FP16("sam3_tracker_fp16_decoder.onnx");
 
     fun load(): OrtSession {
@@ -241,7 +241,7 @@ sealed interface SamDecoder<E : EncoderResult> : AutoCloseable {
         fun newDecoder(encoderResult: EncoderResult): SamDecoder<*> {
             return when (encoderResult) {
                 is Sam1EncoderResult -> Sam1Decoder(DecoderModel.SAM1.load())
-                is Sam2EncoderResult -> Sam2Decoder(DecoderModel.SAM2_LARGE.load())
+                is Sam2EncoderResult -> Sam2Decoder(DecoderModel.SAM2.load())
                 is Sam3TrackerEncoderResult -> Sam3TrackerDecoder(DecoderModel.SAM3_TRACKER_FP16.load())
             }
         }
