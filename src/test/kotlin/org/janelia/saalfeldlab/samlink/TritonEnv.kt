@@ -1,8 +1,8 @@
 package org.janelia.saalfeldlab.samlink
 
-import org.janelia.saalfeldlab.samlink.encode.Sam1TritonEncoder
-import org.janelia.saalfeldlab.samlink.encode.Sam2TritonEncoder
-import org.janelia.saalfeldlab.samlink.encode.Sam3TrackerTritonEncoder
+import org.janelia.saalfeldlab.samlink.encode.triton.Sam1TritonEncoder
+import org.janelia.saalfeldlab.samlink.encode.triton.Sam2TritonEncoder
+import org.janelia.saalfeldlab.samlink.encode.triton.Sam3TrackerTritonEncoder
 import java.net.URI
 
 /**
@@ -28,8 +28,8 @@ object TritonEnv {
         return TritonClient(host = name, port = port)
     }
 
-    fun newSam1Encoder(): Sam1TritonEncoder = Sam1TritonEncoder(host, sam1Model, grpcPort = port)
-    fun newSam2Encoder(): Sam2TritonEncoder = Sam2TritonEncoder(host, sam2Model, grpcPort = port)
+    fun newSam1Encoder(): Sam1TritonEncoder = Sam1TritonEncoder(host, port, sam1Model)
+    fun newSam2Encoder(): Sam2TritonEncoder = Sam2TritonEncoder(host, port, sam2Model)
     fun newSam3TrackerEncoder(): Sam3TrackerTritonEncoder =
-        Sam3TrackerTritonEncoder(host, sam3TrackerModel, grpcPort = port)
+        Sam3TrackerTritonEncoder(host, port, sam3TrackerModel)
 }

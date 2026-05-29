@@ -6,7 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 
 /**
- * resource-packaging test
+ * test load of the bundled models
  */
 class DecoderModelLoadTest {
 
