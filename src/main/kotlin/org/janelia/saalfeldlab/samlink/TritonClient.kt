@@ -30,7 +30,6 @@ import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.launch
 import java.lang.Float.float16ToFloat
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -40,26 +39,24 @@ import java.util.concurrent.atomic.AtomicInteger
  * Multiplexed streaming Triton client with a per-lane stream + channel pool.
  *
  * Keeps [streamCount] lanes open. Each lane is self-contained:
- *   - its own [ManagedChannel]
- *   - its own single-thread [NioEventLoopGroup]
- *   - its own long-lived `ModelStreamInfer` bidi RPC
+ *   - [ManagedChannel]
+ *   - single-thread [NioEventLoopGroup]
+ *   - long-lived `ModelStreamInfer` bidi RPC
  */
 class TritonClient(
-    private val host: String,
-    private val port: Int,
-    private val timeoutMs: Long = 0,
-    private val useTls: Boolean = port == 443,
-    private val compression: String? = "gzip",
-    private val maxStreamRetries: Int = 3,
-    private val streamCount: Int = 4,
+    val host: String,
+    val port: Int,
+    var timeoutMs: Long = 0,
+    val useTls: Boolean = port == 443,
+    val compression: String? = "gzip",
+    val maxStreamRetries: Int = 3,
+    val streamCount: Int = 4,
 ) : AutoCloseable {
 
     private val lock = Any()
 
     private var closed = false
-    private val scope = CoroutineScope(
-        SupervisorJob() + Dispatchers.IO + CoroutineName("TritonClient")
-    )
+    private val scope = CoroutineScope( SupervisorJob() + Dispatchers.IO + CoroutineName("TritonClient") )
 
     init {
         require(streamCount >= 1) { "streamCount must be >= 1, got $streamCount" }
@@ -67,35 +64,9 @@ class TritonClient(
         scope.launch { hintOrtEnvInit() }
     }
 
-    private class PendingCall(
-        val request: GrpcService.ModelInferRequest,
-        val deferred: CompletableDeferred<GrpcService.ModelInferResponse>,
-    ) {
-        @Volatile
-        var attempts: Int = 0
-    }
-
     private val pending = ConcurrentHashMap<String, PendingCall>()
     private val pool: Array<Lane?> = arrayOfNulls(streamCount)
     private val nextSlot = AtomicInteger()
-
-    /**
-     * A self-contained inference lane: dedicated channel, dedicated Netty event loop,
-     * and a single bidi-streaming collector coroutine.
-     *
-     * The [channel] + [eventLoop] live across stream-level failures; only the
-     * [requests] channel and [collector] coroutine are rebuilt when the RPC fails.
-     */
-    private class Lane(
-        val slot: Int,
-        val channel: ManagedChannel,
-        val eventLoop: NioEventLoopGroup,
-        val requests: Channel<GrpcService.ModelInferRequest>,
-    ) {
-        /** Request ids currently in flight on this lane — used to scope retries. */
-        val ownedIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
-        lateinit var collector: Job
-    }
 
     private fun pickSlot(): Int = (nextSlot.getAndIncrement() and Int.MAX_VALUE) % streamCount
 
@@ -104,7 +75,7 @@ class TritonClient(
         val channel = NettyChannelBuilder.forAddress(host, port)
             .eventLoopGroup(eventLoop)
             .channelType(NioSocketChannel::class.java)
-            .maxInboundMessageSize(32 * MEGABYTES)
+            .maxInboundMessageSize(32 * BYTES_MB)
             .apply { if (!useTls) usePlaintext() }
             .build()
         return channel to eventLoop
@@ -254,20 +225,24 @@ class TritonClient(
      * cancellation unregisters the pending entry; a later-arriving response for that
      * id is silently discarded.
      */
-    suspend fun infer(modelName: String, inputs: List<InferInput>, params: Map<String, GrpcService.InferParameter> = emptyMap()): InferResponse {
+    suspend fun infer(
+        model: String,
+        inferInputs: List<InferenceInput>,
+        params: Map<String, GrpcService.InferParameter> = emptyMap()
+    ): GrpcService.ModelInferResponse {
         val requestId = UUID.randomUUID().toString()
         val request = modelInferRequest {
-            this.modelName = modelName
+            modelName = model
             id = requestId
             priority(5)
             parameters.putAll(params)
-            for (input in inputs) {
-                this.inputs += inferInputTensor {
+            for (input in inferInputs) {
+                inputs += inferInputTensor {
                     name = input.name
                     datatype = input.datatype
-                    shape += input.shape
+                    shape += input.shape.toList()
                 }
-                rawInputContents += input.data!!
+                rawInputContents += input.data
             }
         }
         val call = PendingCall(request, CompletableDeferred())
@@ -276,7 +251,7 @@ class TritonClient(
         lane.ownedIds.add(requestId)
         try {
             lane.requests.send(request)
-            return InferResponse(call.deferred.await())
+            return call.deferred.await()
         } finally {
             pending.remove(requestId)
             lane.ownedIds.remove(requestId)
@@ -316,42 +291,17 @@ class TritonClient(
      * @property shape tensor shape as list of dimensions
      * @property data tensor data as ByteString
      */
-    data class InferInput(
+    class InferenceInput(
         val name: String,
+        val shape: LongArray,
         val datatype: String,
-        val shape: List<Long>,
-        val data: ByteString? = null,
+        val data: ByteString,
     )
-
-    /**
-     * Wrapper for inference response with convenient output parsing.
-     */
-    class InferResponse(private val response: GrpcService.ModelInferResponse) {
-
-        /**
-         * Get output tensor by name as a float array.
-         * Automatically handles FP16 to FP32 conversion if needed.
-         */
-        fun getFloatArray(name: String): FloatArray? {
-            val index = response.outputsList.indexOfFirst { it.name == name }
-            if (index < 0) return null
-
-            val output = response.outputsList[index]
-            val rawBytes = response.getRawOutputContents(index)
-            val buffer = rawBytes.asReadOnlyByteBuffer().order(ByteOrder.LITTLE_ENDIAN)
-
-            return if (output.datatype == "FP16") {
-                fp16BytesToFloatArray(buffer)
-            } else {
-                FloatArray(buffer.remaining() / 4).also { buffer.asFloatBuffer().get(it) }
-            }
-        }
-    }
 
 
     companion object {
 
-        private const val MEGABYTES = 1024 * 1024
+        private const val BYTES_MB = 1024 * 1024
 
         private val LOG = KotlinLogging.logger { }
 
@@ -360,12 +310,38 @@ class TritonClient(
             val count = buffer.remaining() / 2
             return FloatArray(count) { float16ToFloat(buffer.short) }
         }
-
-        private suspend fun hintOrtEnvInit() {
-            if (ORT_ENV_LAZY.isInitialized())
-                coroutineScope {
-                    ORT_ENV //It's a lazy delegate, this should load it
-                }
-        }
     }
+}
+
+private suspend fun hintOrtEnvInit() {
+    if (ORT_ENV_LAZY.isInitialized())
+        coroutineScope {
+            ORT_ENV //It's a lazy delegate, this should load it
+        }
+}
+
+/**
+ * A self-contained inference lane: dedicated channel, dedicated Netty event loop,
+ * and a single bidi-streaming collector coroutine.
+ *
+ * The [channel] + [eventLoop] live across stream-level failures; only the
+ * [requests] channel and [collector] coroutine are rebuilt when the RPC fails.
+ */
+private class Lane(
+    val slot: Int,
+    val channel: ManagedChannel,
+    val eventLoop: NioEventLoopGroup,
+    val requests: Channel<GrpcService.ModelInferRequest>,
+) {
+    /** Request ids currently in flight on this lane — used to scope retries. */
+    val ownedIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    lateinit var collector: Job
+}
+
+private class PendingCall(
+    val request: GrpcService.ModelInferRequest,
+    val deferred: CompletableDeferred<GrpcService.ModelInferResponse>,
+) {
+    @Volatile
+    var attempts: Int = 0
 }

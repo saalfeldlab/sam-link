@@ -1,17 +1,22 @@
 package org.janelia.saalfeldlab.samlink.encode
 
 import ai.onnxruntime.OnnxTensor
-import org.janelia.saalfeldlab.samlink.ORT_ENV
+import com.google.protobuf.ByteString
+import com.google.protobuf.UnsafeByteOperations
+import org.janelia.saalfeldlab.samlink.encode.triton.Sam1TritonEncoder
+import org.janelia.saalfeldlab.samlink.encode.triton.Sam2TritonEncoder
+import org.janelia.saalfeldlab.samlink.encode.triton.Sam3TrackerTritonEncoder
 import java.awt.image.BufferedImage
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.max
 
 /**
  * Interface for SAM image encoders.
  *
  * @param O the options type for this encoder
  */
-sealed interface SamEncoder<R: EncoderResult, O : EncodeOptions> : AutoCloseable {
+interface SamEncoder<R : EncoderResult, O : EncodeOptions> : AutoCloseable {
 
     /**
      * Returns a new options instance with default values.
@@ -33,11 +38,6 @@ sealed interface SamEncoder<R: EncoderResult, O : EncodeOptions> : AutoCloseable
     suspend fun encode(image: BufferedImage, options: O = options()): R
 
     /**
-     * The input size expected by this encoder.
-     */
-    val inputSize: Int
-
-    /**
      * Check if the encoder service is ready for inference.
      */
     suspend fun isReady(): Boolean
@@ -45,66 +45,41 @@ sealed interface SamEncoder<R: EncoderResult, O : EncodeOptions> : AutoCloseable
 
 /**
  * Base class for encoder results.
- * Results hold OnnxTensors and must be closed when no longer needed.
+ * EncoderResult may hold closeable references, and should be closed when no longer needed.
  *
  * [imageWidth] and [imageHeight] are the dimensions of the image content
  * within the [inputSize]×[inputSize] padded square, after resizing.
  * The content occupies the top-left [imageWidth]×[imageHeight] region;
- * the remainder is black padding.
+ * the remainder is padding.
  */
 sealed interface EncoderResult : AutoCloseable {
 
-    val inputSize: Int
+    /** required [inputSize]x[inputSize] padded input */
+    val inputSize: Long
+
+    /** width of the image content in the padded [inputSize]x[inputSize] encoded input */
     val imageWidth: Int
+
+    /** height of the image content in the padded [inputSize]x[inputSize] encoded input */
     val imageHeight: Int
 }
 
 /**
- * Base interface for encoder options.
- * Each encoder type defines its own options class.
- */
-sealed interface EncodeOptions
-
-abstract class TritonEncodeOptions(var priority: Long) : EncodeOptions
-
-/**
- * Options for SAM2 Triton encoder.
- */
-class Sam1TritonOptions(priority: Long = 5) : TritonEncodeOptions(priority)
-
-/**
- * Options for SAM2 Triton encoder.
- */
-class Sam2TritonOptions(priority: Long = 5) : TritonEncodeOptions(priority)
-
-/**
- * Options for SAM3 Triton encoder.
- */
-class Sam3TritonOptions(priority: Long = 5) : TritonEncodeOptions(priority)
-
-/**
- * Options for SAM3 Tracker Triton encoder.
- */
-class Sam3TrackerTritonOptions(priority: Long = 5) : TritonEncodeOptions(priority)
-
-/**
- * SAM1 encoder result - only image embeddings.
+ * SAM1 encoder result
  *
  * @property imageEmbedding image embeddings tensor, shape (1, 256, 64, 64)
- * @property sessionId the session ID used for this encoding request
  */
 data class Sam1EncoderResult(
     val imageEmbedding: OnnxTensor,
-    val sessionId: String,
-    override val imageWidth: Int = 1024,
-    override val imageHeight: Int = 1024
+    override val imageWidth: Int,
+    override val imageHeight: Int
 ) : EncoderResult {
-    override val inputSize: Int get() = 1024
+    override val inputSize = Sam1TritonEncoder.INPUT_SIZE
     override fun close() = imageEmbedding.close()
 }
 
 /**
- * SAM2/2.1 encoder result - image embeddings + high resolution features.
+ * SAM2 encoder result
  *
  * @property imageEmbedding image embeddings tensor, shape (1, 256, 64, 64)
  * @property highResFeats0 high resolution features level 0, shape (1, 32, 256, 256)
@@ -114,10 +89,11 @@ data class Sam2EncoderResult(
     val imageEmbedding: OnnxTensor,
     val highResFeats0: OnnxTensor,
     val highResFeats1: OnnxTensor,
-    override val imageWidth: Int = 1024,
-    override val imageHeight: Int = 1024
+    override val imageWidth: Int,
+    override val imageHeight: Int
 ) : EncoderResult {
-    override val inputSize: Int get() = 1024
+
+    override val inputSize = Sam2TritonEncoder.INPUT_SIZE
     override fun close() {
         imageEmbedding.close()
         highResFeats0.close()
@@ -126,7 +102,7 @@ data class Sam2EncoderResult(
 }
 
 /**
- * SAM3 Tracker encoder result - image embeddings at three scales.
+ * SAM3 Tracker encoder result.
  *
  * @property imageEmbeddings0 level 0 embeddings, shape (1, 32, 288, 288)
  * @property imageEmbeddings1 level 1 embeddings, shape (1, 64, 144, 144)
@@ -136,10 +112,10 @@ data class Sam3TrackerEncoderResult(
     val imageEmbeddings0: OnnxTensor,
     val imageEmbeddings1: OnnxTensor,
     val imageEmbeddings2: OnnxTensor,
-    override val imageWidth: Int = 1008,
-    override val imageHeight: Int = 1008
+    override val imageWidth: Int,
+    override val imageHeight: Int
 ) : EncoderResult {
-    override val inputSize: Int get() = 1008
+    override val inputSize = Sam3TrackerTritonEncoder.INPUT_SIZE
     override fun close() {
         imageEmbeddings0.close()
         imageEmbeddings1.close()
@@ -148,60 +124,74 @@ data class Sam3TrackerEncoderResult(
 }
 
 /**
- * Create an OnnxTensor from a FloatArray using a direct buffer.
+ * Given an image with dimensions [imageWidth]x[imageHeight], calculate the size of the image data
+ * after scaling such that the longest edge becomes [maxEdgeSize]. The resulting dimensions may be
+ * larger or smaller than the original dimensions, but will maintain the aspect ratio.
  */
-fun createTensorDirect(
-    data: FloatArray,
-    shape: LongArray
-): OnnxTensor {
-    val byteSize = data.size * 4
-    val directBuffer = ByteBuffer.allocateDirect(byteSize).order(ByteOrder.nativeOrder())
-    directBuffer.asFloatBuffer().put(data)
-    directBuffer.position(0)
-    return OnnxTensor.createTensor(ORT_ENV, directBuffer.asFloatBuffer(), shape)
-}
+fun scaleToMaxEdgeSize(imageWidth: Int, imageHeight: Int, maxEdgeSize: Int): Pair<Int, Int> {
+    val actualMaxEdge = maxOf(imageWidth, imageHeight)
 
-/**
- * Compute the content dimensions after [resizeImageWithPadding].
- * Only downscales if the image is larger than [targetSize]; otherwise returns original dimensions.
- */
-fun contentDimensions(imageWidth: Int, imageHeight: Int, targetSize: Int): Pair<Int, Int> {
-    val maxEdge = maxOf(imageWidth, imageHeight)
-    return if (maxEdge > targetSize) {
-        val scale = targetSize.toFloat() / maxEdge
-        Pair((imageWidth * scale).toInt(), (imageHeight * scale).toInt())
-    } else {
-        Pair(imageWidth, imageHeight)
+    if (actualMaxEdge == maxEdgeSize)
+        return imageWidth to imageHeight
+
+    val scale = maxEdgeSize.toFloat() / actualMaxEdge.toFloat()
+
+    return when {
+        imageWidth == imageHeight -> maxEdgeSize to maxEdgeSize
+        imageWidth > imageHeight -> maxEdgeSize to (imageHeight * scale).toInt()
+        else  -> (imageWidth * scale).toInt() to maxEdgeSize
     }
 }
 
 /**
- * Place image into a [targetSize]×[targetSize] square, padding with black.
- * If the image is larger than [targetSize] on either side, it is downscaled
- * so the longest edge fits. If already smaller, it is placed at the top-left
- * without upscaling.
+ * Scale [image] to a resulting [BufferedImage] of the [targetWidth]×[targetHeight].
+ * Maintains the aspect ratio and pads with black to fit the target dimensions.
+ * If [image] dimensions match the target dimensions this will return the original image.
  */
-fun resizeImageWithPadding(image: BufferedImage, targetSize: Int): BufferedImage {
-    if (image.width == targetSize && image.height == targetSize)
+fun scaleWithPadding(image: BufferedImage, contentWidth: Int, contentHeight: Int, targetWidth: Int, targetHeight: Int): BufferedImage {
+    if (image.width == targetWidth && image.height == targetHeight)
         return image
-    val srcW = image.width
-    val srcH = image.height
-    val maxEdge = maxOf(srcW, srcH)
-    val drawW: Int
-    val drawH: Int
-    if (maxEdge > targetSize) {
-        val scale = targetSize.toFloat() / maxEdge
-        drawW = (srcW * scale).toInt()
-        drawH = (srcH * scale).toInt()
-    } else {
-        drawW = srcW
-        drawH = srcH
+
+    return BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB).apply {
+        val graphics = createGraphics()
+        graphics.drawImage(image, 0, 0, contentWidth, contentHeight, null)
+        graphics.dispose()
+    }
+}
+
+/**
+ * Convert a [BufferedImage] to a [ByteString] in channel-height-width format (CHW).
+ * Assumes input is [BufferedImage.TYPE_INT_RGB].
+ *
+ * Maps RGB values from [0,255] to [outputRange]
+ *
+ * @param outputRange range to normalize pixel values to, default is [0f, 1f]
+ */
+fun BufferedImage.intRGBtoCHW(outputRange : ClosedFloatingPointRange<Float> = 0f..1f): ByteString {
+    val dataBuffer = raster.dataBuffer
+    val numPixels = width * height
+    val rgbCount = 3 * numPixels
+    val buffer = ByteBuffer.allocate(rgbCount * 4).order(ByteOrder.LITTLE_ENDIAN)
+    val floatView = buffer.asFloatBuffer()
+
+    val rgbRange = 255f
+    val scale = (outputRange.endInclusive - outputRange.start) / rgbRange
+    val offset = outputRange.start
+
+    /* reorder to channel-height-width format and normalize to output range*/
+    repeat(numPixels) { redIdx ->
+        val greenIdx = redIdx + numPixels
+        val blueIdx = redIdx + numPixels * 2
+
+        val rgbInt = dataBuffer.getElem(redIdx)
+        val red = ((rgbInt shr 16) and 0xFF) * scale + offset
+        val green = ((rgbInt shr 8) and 0xFF) * scale + offset
+        val blue = (rgbInt and 0xFF) * scale + offset
+
+        floatView.put(redIdx, red)
+        floatView.put(greenIdx, green)
+        floatView.put(blueIdx, blue)
     }
 
-    return BufferedImage(targetSize, targetSize, BufferedImage.TYPE_INT_RGB)
-        .apply {
-            createGraphics().apply {
-                drawImage(image, 0, 0, drawW, drawH, null)
-            }.dispose()
-        }
+    return UnsafeByteOperations.unsafeWrap(buffer)
 }
