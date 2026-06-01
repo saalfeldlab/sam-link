@@ -24,16 +24,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.launch
-import java.lang.Float.float16ToFloat
-import java.nio.ByteBuffer
+import kotlinx.coroutines.withTimeout
+import java.net.SocketException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Multiplexed streaming Triton client with a per-lane stream + channel pool.
@@ -55,8 +57,11 @@ class TritonClient(
 
     private val lock = Any()
 
+    @Volatile
     private var closed = false
-    private val scope = CoroutineScope( SupervisorJob() + Dispatchers.IO + CoroutineName("TritonClient") )
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("TritonClient"))
+
+    private val controlChannel: Lazy<Pair<ManagedChannel, NioEventLoopGroup>> = lazy { buildChannel() }
 
     init {
         require(streamCount >= 1) { "streamCount must be >= 1, got $streamCount" }
@@ -82,14 +87,14 @@ class TritonClient(
     }
 
     @OptIn(DelicateCoroutinesApi::class)
-    private fun ensureLane(slot: Int): Lane = synchronized(lock) {
+    private fun ensureLaneLocked(slot: Int): Lane {
+        /* lock must already be held */
         check(!closed) { "TritonClient is closed" }
         val existing = pool[slot]
-        if (existing != null && existing.collector.isActive && !existing.requests.isClosedForSend) {
+        if (existing != null && !existing.dead && !existing.requests.isClosedForSend) {
             return existing
         }
-        /* Reuse the underlying channel + event loop if still alive; ManagedChannel
-         * auto-reconnects if the TCP layer dropped. Only rebuild the RPC on top. */
+        /* Reuse the underlying channel and event loop if still alive.  */
         val channel: ManagedChannel
         val eventLoop: NioEventLoopGroup
         if (existing != null && !existing.channel.isShutdown && !existing.channel.isTerminated) {
@@ -105,33 +110,46 @@ class TritonClient(
         val lane = Lane(slot, channel, eventLoop, Channel(Channel.UNLIMITED))
         lane.collector = scope.launch {
             try {
-                coroutineStub(channel)
+                streamingStub(channel)
                     .modelStreamInfer(lane.requests.consumeAsFlow())
                     .collect { response -> dispatch(response, lane) }
-            } catch (t: Throwable) {
-                when {
-                    /* Normal cleanup: client is closing or our own scope was cancelled. */
-                    closed || t is CancellationException -> {
-                        LOG.debug(t) { "modelStreamInfer collector (slot $slot) exited (closed=$closed)" }
-                        if (t is CancellationException) throw t
-                    }
-                    /* Expected under server overload: the per-RPC deadline fired. The channel is
-                     * still healthy; any in-flight requests are retried on a fresh stream, and
-                     * the next infer() call rebuilds the lane via ensureLane. */
-                    Status.fromThrowable(t).code == Status.Code.DEADLINE_EXCEEDED -> {
-                        LOG.debug { "modelStreamInfer collector (slot $slot) deadline exceeded; ${lane.ownedIds.size} in-flight" }
-                        if (lane.ownedIds.isNotEmpty()) scope.launch { retryOwnedPending(lane, t) }
-                    }
-                    /* Real failure: resurrect the stream on this lane and re-send its in-flight requests. */
-                    else -> {
-                        LOG.warn(t) { "modelStreamInfer collector (slot $slot) failed; will retry ${lane.ownedIds.size} in-flight request(s)" }
-                        scope.launch { retryOwnedPending(lane, t) }
-                    }
+            } catch (cause: Throwable) {
+                if (cause is CancellationException) throw cause
+
+                if (closed) {
+                    LOG.debug(cause) { "modelStreamInfer collector (slot $slot) exited (closed)" }
+                    return@launch
                 }
+
+                val retry = synchronized(lock) {
+                    lane.dead = true
+                    lane.ownedIds.toList()
+                }
+
+                if (retry.isEmpty() &&
+                    Status.fromThrowable(cause).code == Status.Code.UNAVAILABLE &&
+                    generateSequence(cause) { it.cause }.any { it is SocketException }
+                ) {
+                    LOG.debug(cause) { "modelStreamInfer collector (slot $slot) reset while idle; lane will rebuild on next infer()" }
+                    return@launch
+                }
+
+                LOG.warn(cause) { "Infer failed. will retry ${retry.size} in-flight request(s)" }
+                if (retry.isNotEmpty()) scope.launch { retryOwnedPending(lane, retry, cause) }
             }
         }
         pool[slot] = lane
-        lane
+        return lane
+    }
+
+    private fun submitLocked(call: PendingCall, slot: Int): Lane = synchronized(lock) {
+        check(!closed) { "TritonClient is closed" }
+        ensureLaneLocked(slot).apply {
+            ownedIds.add(call.request.id)
+            check(requests.trySend(call.request).isSuccess) {
+                "fresh lane's request channel unexpectedly closed"
+            }
+        }
     }
 
     private fun dispatch(response: GrpcService.ModelStreamInferResponse, lane: Lane) {
@@ -151,25 +169,12 @@ class TritonClient(
         }
     }
 
-    private suspend fun retryOwnedPending(failedLane: Lane, cause: Throwable) {
-        val ownedSnapshot = failedLane.ownedIds.toList()
-        if (ownedSnapshot.isEmpty()) return
+    private fun retryOwnedPending(failedLane: Lane, ownedSnapshot: List<String>, cause: Throwable) {
         val callsToRetry = ownedSnapshot.mapNotNull { id -> pending[id] }
-        /* Rebuild the lane's RPC (channel + event loop are reused). */
-        val newLane = try {
-            ensureLane(failedLane.slot)
-        } catch (_: IllegalStateException) {
-            /* Client was closed between collector death and retry; fail this lane's pending. */
-            for (call in callsToRetry) {
-                pending.remove(call.request.id)?.deferred?.completeExceptionally(cause)
-            }
-            return
-        }
         for (call in callsToRetry) {
             call.attempts++
             if (call.attempts > maxStreamRetries) {
-                pending.remove(call.request.id)
-                call.deferred.completeExceptionally(
+                pending.remove(call.request.id)?.deferred?.completeExceptionally(
                     StatusRuntimeException(
                         Status.UNAVAILABLE
                             .withDescription("stream failed after $maxStreamRetries retries")
@@ -179,12 +184,10 @@ class TritonClient(
                 continue
             }
             failedLane.ownedIds.remove(call.request.id)
-            newLane.ownedIds.add(call.request.id)
             try {
-                newLane.requests.send(call.request)
+                submitLocked(call, failedLane.slot)
             } catch (e: Exception) {
-                pending.remove(call.request.id)
-                call.deferred.completeExceptionally(e)
+                pending.remove(call.request.id)?.deferred?.completeExceptionally(e)
             }
         }
     }
@@ -196,22 +199,20 @@ class TritonClient(
     }
 
     /**
-     * Health check on a one-shot channel. Deliberately does NOT use the lane pool.
+     * Health check over the shared control channel; safe to poll without paying
+     * per-call channel construction.
      */
     suspend fun isModelReady(modelName: String, modelVersion: String = ""): Boolean {
-        val (channel, eventLoop) = buildChannel()
-        try {
+        val (channel, _) = controlChannel.value
+        return try {
             val request = modelReadyRequest {
                 name = modelName
                 version = modelVersion
             }
-            return coroutineStub(channel).modelReady(request).ready
+            unaryStub(channel).modelReady(request).ready
         } catch (e: Exception) {
             LOG.warn { "modelReady failed for model [$modelName] at $host:$port: ${e.message}" }
-            return false
-        } finally {
-            channel.shutdownNow()
-            eventLoop.shutdownGracefully()
+            false
         }
     }
 
@@ -221,9 +222,11 @@ class TritonClient(
 
     /**
      * Submit one inference. Routes to one of the [streamCount] lanes round-robin;
-     * transparently retries on stream failure (up to [maxStreamRetries]). Caller
-     * cancellation unregisters the pending entry; a later-arriving response for that
-     * id is silently discarded.
+     * transparently retries on stream failure (up to [maxStreamRetries]). When
+     * [timeoutMs] > 0 it bounds the per-call wait via [withTimeout] (the server-side
+     * work isn't cancelled; a late response is simply discarded). Caller cancellation
+     * unregisters the pending entry; a later-arriving response for that id is
+     * silently discarded.
      */
     suspend fun infer(
         model: String,
@@ -246,19 +249,42 @@ class TritonClient(
             }
         }
         val call = PendingCall(request, CompletableDeferred())
-        val lane = ensureLane(pickSlot())
         pending[requestId] = call
-        lane.ownedIds.add(requestId)
+        val lane = try {
+            submitLocked(call, pickSlot())
+        } catch (e: Throwable) {
+            pending.remove(requestId)
+            throw e
+        }
         try {
-            lane.requests.send(request)
-            return call.deferred.await()
+            return if (timeoutMs > 0) {
+                withTimeout(timeoutMs.milliseconds) { call.deferred.await() }
+            } else {
+                call.deferred.await()
+            }
+        } catch (e: TimeoutCancellationException) {
+            throw StatusRuntimeException(
+                Status.DEADLINE_EXCEEDED
+                    .withDescription("infer($model) timed out after ${timeoutMs.milliseconds}")
+                    .withCause(e)
+            )
         } finally {
             pending.remove(requestId)
             lane.ownedIds.remove(requestId)
         }
     }
 
-    private fun coroutineStub(
+    /** Streaming stub: never carries a stream-wide deadline (per-call timing is in [infer]). */
+    private fun streamingStub(
+        channel: ManagedChannel,
+    ): GRPCInferenceServiceGrpcKt.GRPCInferenceServiceCoroutineStub {
+        var stub = GRPCInferenceServiceGrpcKt.GRPCInferenceServiceCoroutineStub(channel)
+        if (compression != null) stub = stub.withCompression(compression)
+        return stub
+    }
+
+    /** Unary stub: per-RPC deadline is meaningful here (single request/response). */
+    private fun unaryStub(
         channel: ManagedChannel,
     ): GRPCInferenceServiceGrpcKt.GRPCInferenceServiceCoroutineStub {
         var stub = GRPCInferenceServiceGrpcKt.GRPCInferenceServiceCoroutineStub(channel)
@@ -278,6 +304,11 @@ class TritonClient(
                 lane.eventLoop.shutdownGracefully()
                 pool[i] = null
             }
+            if (controlChannel.isInitialized()) {
+                val (ch, elg) = controlChannel.value
+                ch.shutdown()
+                elg.shutdownGracefully()
+            }
         }
         scope.cancel()
         failAllPending(IllegalStateException("TritonClient is closed"))
@@ -287,7 +318,7 @@ class TritonClient(
      * Input tensor for inference request.
      *
      * @property name tensor name
-     * @property datatype data type string (e.g., "FP32", "FP16")
+     * @property datatype data type string (e.g., "FP32")
      * @property shape tensor shape as list of dimensions
      * @property data tensor data as ByteString
      */
@@ -298,18 +329,9 @@ class TritonClient(
         val data: ByteString,
     )
 
-
     companion object {
-
         private const val BYTES_MB = 1024 * 1024
-
         private val LOG = KotlinLogging.logger { }
-
-        /** Convert FP16 bytes to float array */
-        fun fp16BytesToFloatArray(buffer: ByteBuffer): FloatArray {
-            val count = buffer.remaining() / 2
-            return FloatArray(count) { float16ToFloat(buffer.short) }
-        }
     }
 }
 
@@ -336,6 +358,14 @@ private class Lane(
     /** Request ids currently in flight on this lane — used to scope retries. */
     val ownedIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
     lateinit var collector: Job
+
+    /**
+     * Set by the collector's catch path (under TritonClient.lock) once the stream
+     * has failed. Submitters check it inside the same lock before adding to the
+     * lane, which closes the race between "lane just died" and "new submission".
+     */
+    @Volatile
+    var dead: Boolean = false
 }
 
 private class PendingCall(

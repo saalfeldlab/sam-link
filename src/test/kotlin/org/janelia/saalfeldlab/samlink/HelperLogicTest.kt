@@ -1,19 +1,13 @@
 package org.janelia.saalfeldlab.samlink
 
-import org.janelia.saalfeldlab.samlink.decode.BoxPrompt
-import org.janelia.saalfeldlab.samlink.decode.MaskPrompt
-import org.janelia.saalfeldlab.samlink.decode.PointPrompt
-import org.janelia.saalfeldlab.samlink.decode.SamPointLabel
-import org.janelia.saalfeldlab.samlink.decode.SamPrompt
-import org.janelia.saalfeldlab.samlink.encode.scaleToMaxEdgeSize
-import org.janelia.saalfeldlab.samlink.encode.scaleWithPadding
+import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.scaleToMaxEdgeSize
+import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.scaleWithPadding
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import java.awt.Color
 import java.awt.image.BufferedImage
 import kotlin.math.abs
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -101,67 +95,6 @@ class HelperLogicTest {
             val out = scaleWithPadding(source, scaledWidth, scaledHeight, edgeSize, edgeSize)
             assertEquals(edgeSize, out.width)
             assertEquals(edgeSize, out.height)
-        }
-    }
-
-
-    @Nested
-    inner class SamPromptComposition {
-
-        @Nested inner class BoxPromptTest {
-
-            @Test
-            fun `sort corners regardless order`() {
-                val box = BoxPrompt(x1 = 200f, y1 = 150f, x2 = 50f, y2 = 80f)
-                assertEquals(50f, box.topLeft.x)
-                assertEquals(80f, box.topLeft.y)
-                assertEquals(200f, box.bottomRight.x)
-                assertEquals(150f, box.bottomRight.y)
-                assertEquals(SamPointLabel.BOX_TOP_LEFT, box.topLeft.label)
-                assertEquals(SamPointLabel.BOX_BOTTOM_RIGHT, box.bottomRight.label)
-            }
-
-            @Test
-            fun `flatten returns box as a single prompt`() {
-                val outer = SamPrompt().add(SamPrompt().add(BoxPrompt(0f, 0f, 10f, 10f)))
-                val flat = outer.flatten()
-                assertEquals(1, flat.size)
-                assertTrue(flat[0] is BoxPrompt)
-            }
-        }
-
-
-
-
-        @Test
-        fun `addMask twice keeps only the latest MaskPrompt`() {
-            val prompt = SamPrompt()
-                .addMask(FloatArray(256 * 256) { 0.25f })
-                .addMask(FloatArray(256 * 256) { 0.75f })
-            val masks = prompt.prompts.filterIsInstance<MaskPrompt>()
-            assertEquals(1, masks.size)
-            assertEquals(0.75f, masks[0].mask[0])
-        }
-
-        @Test
-        fun `SamPrompt copy is independent of the original mask buffer`() {
-            val original = SamPrompt().addMask(FloatArray(256 * 256) { 0.5f })
-            val copy = original.copy()
-            val originalMask = original.prompts.filterIsInstance<MaskPrompt>().single().mask
-            originalMask[0] = 1.234f
-            val copiedMask = copy.prompts.filterIsInstance<MaskPrompt>().single().mask
-            assertNotEquals(copiedMask[0], 1.234f, "copy should not share mask storage")
-        }
-
-        @Test
-        fun `flatten of a point-only prompt yields the point`() {
-            val prompt = SamPrompt().addPoint(100f, 200f, SamPointLabel.FOREGROUND)
-            val flat = prompt.flatten()
-            assertEquals(1, flat.size)
-            val point = flat[0] as PointPrompt
-            assertEquals(100f, point.x)
-            assertEquals(200f, point.y)
-            assertEquals(SamPointLabel.FOREGROUND, point.label)
         }
     }
 

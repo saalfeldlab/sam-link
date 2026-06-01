@@ -1,9 +1,14 @@
 package org.janelia.saalfeldlab.samlink.decode
 
 import ai.onnxruntime.*
+import ai.onnxruntime.OnnxTensor
 import org.janelia.saalfeldlab.samlink.encode.Sam1EncoderResult
-import org.janelia.saalfeldlab.samlink.ORT_ENV
-import java.nio.FloatBuffer
+import org.janelia.saalfeldlab.samlink.models.DecodeParameter.Companion.get
+import org.janelia.saalfeldlab.samlink.models.ModelParameter.Companion.set
+import org.janelia.saalfeldlab.samlink.models.Sam1Model
+import org.janelia.saalfeldlab.samlink.models.Sam1Model.Decoder.Inputs
+import org.janelia.saalfeldlab.samlink.models.Sam1Model.Decoder.OUTPUT_EDGE_SIZE
+import org.janelia.saalfeldlab.samlink.models.Sam1Model.Decoder.Outputs
 
 /**
  * SAM1 decoder implementation backed by onnx model.
@@ -12,61 +17,86 @@ class Sam1Decoder(private val session: OrtSession) : SamDecoder<Sam1EncoderResul
 
     override val supportsMaskRefinement = true
 
-    override fun decode(encoderResult: Sam1EncoderResult, prompt: SamPrompt): SamDecoder.DecoderResult {
+    override fun decode(encoderResult: Sam1EncoderResult, prompt: SamPrompt): DecoderResult {
         val owned = mutableListOf<OnnxTensor>()
         val inputs = mutableMapOf<String, OnnxTensor>()
-        inputs["image_embeddings"] = encoderResult.imageEmbedding
-        addPromptInputs(prompt, inputs, owned)
-        inputs["orig_im_size"] =
-            OnnxTensor.createTensor( ORT_ENV,
-            FloatBuffer.wrap(floatArrayOf(1024f, 1024f)), longArrayOf(2)
-        ).also { owned += it }
+
+        inputs[Inputs.IMAGE_EMBEDDINGS.parameter] = encoderResult.imageEmbedding
+        inputs[Inputs.ORIG_IM_SIZE.parameter] =
+            Inputs.ORIG_IM_SIZE.allocateDirectTensor(floatArrayOf(1024f, 1024f)).also { owned += it }
+
+        val scaledPrompt = prompt.scaleToEncodeInput(encoderResult)
+
+        addPromptInputs(scaledPrompt, inputs, owned)
+
         return runDecoder(inputs, owned)
     }
 
     private fun addPromptInputs(
-        prompt: SamPromptBase,
+        prompt: SamPrompt,
         inputs: MutableMap<String, OnnxTensor>,
         owned: MutableList<OnnxTensor>
     ) {
-        when (prompt) {
-            is PointPrompt -> SamDecoder.addPointInputs(listOf(prompt), inputs, owned)
-            is MaskPrompt -> SamDecoder.addMaskInputs(prompt.mask, inputs, owned = owned)
-            is SamPrompt -> {
-                val allPoints = mutableListOf<PointPrompt>()
-                var lastMask: FloatArray? = null
-                for (leaf in prompt.flatten()) {
-                    when (leaf) {
-                        is BoxPrompt -> allPoints.addAll(leaf.prompts.filterIsInstance<PointPrompt>())
-                        is PointPrompt -> allPoints.add(leaf)
-                        is MaskPrompt -> lastMask = leaf.mask
-                        else -> {}
-                    }
-                }
-                if (allPoints.isEmpty())
-                    allPoints.add(PointPrompt(0f, 0f, SamPointLabel.BACKGROUND))
-                SamDecoder.addPointInputs(allPoints, inputs, owned)
-
-                if (lastMask != null)
-                    SamDecoder.addMaskInputs(SamDecoder.binaryToLogits(lastMask), inputs, owned = owned)
-                else
-                    SamDecoder.addEmptyMaskInputs(inputs, owned)
+        val points = mutableListOf<PointPrompt>()
+        var mask: MaskPrompt? = null
+        for (leaf in prompt.flatten()) {
+            when (leaf) {
+                is PointPrompt -> points += leaf
+                is BoxPrompt -> points += leaf.prompts.filterIsInstance<PointPrompt>()
+                is MaskPrompt -> mask = leaf
+                else -> {}
             }
+        }
+        if (points.isEmpty())
+            points += PointPrompt(0f, 0f, SamPointLabel.BACKGROUND)
+
+        addPoints(points, inputs, owned)
+
+        val (maskPrompt, hasMask) = mask?.let { it to true } ?: (EMPTY_MASK_PROMPT to false)
+        addMask(maskPrompt, inputs, owned, hasMask)
+
+    }
+
+    private fun addMask(
+        prompt: MaskPrompt,
+        inputs: MutableMap<String, OnnxTensor>,
+        owned: MutableList<OnnxTensor>,
+        hasMask: Boolean = true
+    ) {
+
+        inputs[Inputs.MASK_INPUT] = Inputs.MASK_INPUT.allocateDirectTensor(prompt.mask).also {
+            owned += it
+        }
+
+        val hasMaskData = floatArrayOf(if (hasMask) 1f else 0f)
+        inputs[Inputs.HAS_MASK_INPUT] = Inputs.HAS_MASK_INPUT.wrapAsTensor(hasMaskData).also {
+            owned += it
         }
     }
 
-    private fun runDecoder(inputs: Map<String, OnnxTensor>, owned: List<OnnxTensor>): SamDecoder.DecoderResult {
+    private fun addPoints(
+        points: List<PointPrompt>,
+        inputs: MutableMap<String, OnnxTensor>,
+        owned: MutableList<OnnxTensor>
+    ) {
+
+        val (coords, labels) = Inputs.createPointTensors(points)
+        inputs[Inputs.POINT_COORDS] = coords.also { owned += it }
+        inputs[Inputs.POINT_LABELS] = labels.also { owned += it }
+    }
+
+    private fun runDecoder(inputs: Map<String, OnnxTensor>, owned: List<OnnxTensor>): DecoderResult {
 
         val results = session.run(inputs)
 
         /* "masks" is just upsampled; we do some operations on the low resolution masks
         * and then upsample ourselves, so we can just ignore the high res mask */
-        val masksResult = results.get("low_res_masks").get() as OnnxTensor
-        val iouResult = results.get("iou_predictions").get() as OnnxTensor
+        val masksResult = results[Outputs.LOW_RES_MASKS]
+        val iouResult = results[Outputs.IOU_PREDICTIONS]
 
         val shape = masksResult.info.shape
         val numMasks = shape[1].toInt()
-        val numPixels = MASK_SIZE * MASK_SIZE
+        val numPixels = OUTPUT_EDGE_SIZE * OUTPUT_EDGE_SIZE
         val masksArray = masksResult.floatBuffer.array()
         val iousArray = iouResult.floatBuffer.array()
 
@@ -78,7 +108,7 @@ class Sam1Decoder(private val session: OrtSession) : SamDecoder<Sam1EncoderResul
         owned.forEach { it.close() }
         results.close()
 
-        return SamDecoder.DecoderResult(masks, ious, MASK_SIZE)
+        return DecoderResult(masks, ious, OUTPUT_EDGE_SIZE)
     }
 
     override fun close() {
@@ -86,6 +116,7 @@ class Sam1Decoder(private val session: OrtSession) : SamDecoder<Sam1EncoderResul
     }
 
     companion object {
-        const val MASK_SIZE = 256
+
+        val EMPTY_MASK_PROMPT = MaskPrompt(FloatArray(OUTPUT_EDGE_SIZE * OUTPUT_EDGE_SIZE))
     }
 }

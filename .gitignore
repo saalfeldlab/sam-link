@@ -1,11 +1,3 @@
 /target/
-flyID10/
-hs_err_pid26934.log
-liconn_neurons/
-liconn_small/
-liver_cells/
-overlay.png
-segmentation.png
-test.png
 *.iml
 

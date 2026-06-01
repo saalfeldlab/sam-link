@@ -2,9 +2,9 @@ package org.janelia.saalfeldlab.samlink
 
 import kotlinx.coroutines.runBlocking
 import org.janelia.saalfeldlab.samlink.TestUtils.rectangleImage
-import org.janelia.saalfeldlab.samlink.encode.triton.Sam1TritonEncoder
-import org.janelia.saalfeldlab.samlink.encode.triton.Sam2TritonEncoder
-import org.janelia.saalfeldlab.samlink.encode.triton.Sam3TrackerTritonEncoder
+import org.janelia.saalfeldlab.samlink.models.Sam1Model
+import org.janelia.saalfeldlab.samlink.models.Sam2Model
+import org.janelia.saalfeldlab.samlink.models.Sam3TrackerModel
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import kotlin.test.assertContentEquals
@@ -18,7 +18,7 @@ class EncoderOutputTest {
     @Test
     fun `Sam 1`() = runBlocking {
         TritonEnv.newSam1Encoder().use { encoder ->
-            val edgeSize = Sam1TritonEncoder.INPUT_SIZE.toInt()
+            val edgeSize = Sam1Model.Encoder.INPUT_EDGE_SIZE.toInt()
             val image = rectangleImage(edgeSize, edgeSize)
             encoder.encode(image).use { result ->
                 assertContentEquals(longArrayOf(1, 256, 64, 64), result.imageEmbedding.info.shape)
@@ -29,7 +29,7 @@ class EncoderOutputTest {
     @Test
     fun `Sam 2`() = runBlocking {
         TritonEnv.newSam2Encoder().use { encoder ->
-            val edgeSize = Sam2TritonEncoder.INPUT_SIZE.toInt()
+            val edgeSize = Sam2Model.Encoder.INPUT_EDGE_SIZE.toInt()
             val image = rectangleImage(edgeSize, edgeSize)
             encoder.encode(image).use { result ->
                 assertContentEquals(longArrayOf(1, 256, 64, 64), result.imageEmbedding.info.shape)
@@ -42,7 +42,7 @@ class EncoderOutputTest {
     @Test
     fun `Sam 3 Tracker`() = runBlocking {
         TritonEnv.newSam3TrackerEncoder().use { encoder ->
-            val edgeSize = Sam3TrackerTritonEncoder.INPUT_SIZE.toInt()
+            val edgeSize = Sam3TrackerModel.Encoder.INPUT_EDGE_SIZE.toInt()
             val image = rectangleImage(edgeSize, edgeSize)
             encoder.encode(image).use { result ->
                 assertContentEquals(longArrayOf(1, 32, 288, 288), result.imageEmbeddings0.info.shape)

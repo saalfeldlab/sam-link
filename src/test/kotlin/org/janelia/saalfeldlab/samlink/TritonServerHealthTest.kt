@@ -13,10 +13,17 @@ class TritonServerHealthTest {
 
     @Test
     fun `each configured encoder model reports ready`() = runBlocking {
+        val host = TritonEnv.host()
+        val port = TritonEnv.port()
         TritonEnv.newClient().use { client ->
-            assertTrue(client.isModelReady(TritonEnv.sam1Model), "Sam1 model ${TritonEnv.sam1Model} not ready on ${TritonEnv.host}:${TritonEnv.port}")
-            assertTrue(client.isModelReady(TritonEnv.sam2Model), "Sam2 model ${TritonEnv.sam2Model} not ready on ${TritonEnv.host}:${TritonEnv.port}")
-            assertTrue(client.isModelReady(TritonEnv.sam3TrackerModel), "Sam3Tracker model ${TritonEnv.sam3TrackerModel} not ready on ${TritonEnv.host}:${TritonEnv.port}")
+            val sam1Model = TritonEnv.sam1Model()
+            assertTrue(client.isModelReady(sam1Model), "Sam1 model $sam1Model not ready on $host:$port")
+
+            val sam2Model = TritonEnv.sam2Model()
+            assertTrue(client.isModelReady(sam2Model), "Sam2 model $sam2Model not ready on $host:$port")
+
+            val sam3Model = TritonEnv.sam3TrackerModel()
+            assertTrue(client.isModelReady(sam3Model), "Sam3Tracker model $sam3Model not ready on $host:$port")
         }
     }
 }

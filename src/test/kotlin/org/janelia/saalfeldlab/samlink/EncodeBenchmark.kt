@@ -8,9 +8,6 @@ import org.janelia.saalfeldlab.samlink.EncodeBenchmark.ImageDimensions.*
 import org.janelia.saalfeldlab.samlink.decode.DecoderModel.SAM1
 import org.janelia.saalfeldlab.samlink.decode.DecoderModel.SAM2
 import org.janelia.saalfeldlab.samlink.decode.DecoderModel.SAM3_TRACKER_FP16
-import org.janelia.saalfeldlab.samlink.decode.Sam1Decoder
-import org.janelia.saalfeldlab.samlink.decode.Sam2Decoder
-import org.janelia.saalfeldlab.samlink.decode.Sam3TrackerDecoder
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource

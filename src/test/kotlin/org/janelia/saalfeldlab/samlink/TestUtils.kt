@@ -1,11 +1,10 @@
 package org.janelia.saalfeldlab.samlink
 
-import org.janelia.saalfeldlab.samlink.decode.SamDecoder
+import org.janelia.saalfeldlab.samlink.decode.DecoderResult
 import org.janelia.saalfeldlab.samlink.decode.SamPointLabel
 import org.janelia.saalfeldlab.samlink.decode.SamPrompt
 import org.janelia.saalfeldlab.samlink.encode.EncoderResult
 import org.janelia.saalfeldlab.samlink.encode.SamEncoder
-import org.janelia.saalfeldlab.samlink.encode.scaleToMaxEdgeSize
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.awt.image.DataBufferByte
@@ -102,20 +101,20 @@ suspend fun <T : EncoderResult> testSquareWithBorder(
     decodedImageEdge: Int = 256,
     borderPercent: Double = .25,
     encoder: SamEncoder<T, *>,
-    decode: ((T, SamPrompt) -> SamDecoder.DecoderResult)?,
+    decode: ((T, SamPrompt) -> DecoderResult)?,
 ) {
     val image = TestUtils.rectangleImage(width, height, borderPercent = borderPercent)
     encoder.encode(image).use { encodeResult ->
-        val (scaledWidth, scaledHeight) = scaleToMaxEdgeSize(width, height, encodeResult.inputSize.toInt())
-        val prompt = rectangleTestPrompt(scaledWidth, scaledHeight, borderPercent)
+        /* Prompts are now in source-image pixel space; decoders apply the encoder's transform. */
+        val prompt = rectangleTestPrompt(width, height, borderPercent)
         decode?.let {
 
             val decodeResult = decode(encodeResult, prompt)
             assertTrue(decodeResult.ious.all { it.isFinite() })
             /* Crop so we can expect the correct foreground percentage relative to the input image not the padded, decoded image */
             val scale = decodedImageEdge / encodeResult.inputSize.toDouble()
-            val contentWidth = (scale * encodeResult.imageWidth).toInt()
-            val contentHeight = (scale * encodeResult.imageHeight).toInt()
+            val contentWidth = (scale * encodeResult.scaledWidth).toInt()
+            val contentHeight = (scale * encodeResult.scaledHeight).toInt()
 
             val cropped = TestUtils.cropTopLeft(decodeResult.bestMask, decodedImageEdge, contentWidth, contentHeight)
 

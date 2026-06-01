@@ -1,22 +1,21 @@
 package org.janelia.saalfeldlab.samlink.encode.triton
 
 import org.janelia.saalfeldlab.samlink.TritonClient
-import org.janelia.saalfeldlab.samlink.encode.EncodeParameter
-import org.janelia.saalfeldlab.samlink.encode.EncodeParameter.Companion.getAsTensor
+import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.intRGBtoCHW
+import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.scaleToMaxEdgeSize
+import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.scaleWithPadding
+import org.janelia.saalfeldlab.samlink.models.EncodeParameter.Companion.getAsTensor
 import org.janelia.saalfeldlab.samlink.encode.Sam1EncoderResult
+import org.janelia.saalfeldlab.samlink.models.Sam1Model
+import org.janelia.saalfeldlab.samlink.models.Sam1Model.Encoder.Inputs
+import org.janelia.saalfeldlab.samlink.models.Sam1Model.Encoder.Outputs
 import org.janelia.saalfeldlab.samlink.encode.Sam1TritonOptions
-import org.janelia.saalfeldlab.samlink.encode.intRGBtoCHW
-import org.janelia.saalfeldlab.samlink.encode.scaleToMaxEdgeSize
-import org.janelia.saalfeldlab.samlink.encode.scaleWithPadding
 import java.awt.image.BufferedImage
 
 /**
  * SAM1 encoder using Triton Inference Server.
  *
  * Encodes images into embeddings for SAM1.
- *
- * @property org.janelia.saalfeldlab.samlink.encode.triton.SamTritonEncoder.client Triton Client
- * @property org.janelia.saalfeldlab.samlink.encode.triton.SamTritonEncoder.model model name on the Triton server
  */
 class Sam1TritonEncoder : SamTritonEncoder<Sam1EncoderResult, Sam1TritonOptions> {
 
@@ -27,7 +26,7 @@ class Sam1TritonEncoder : SamTritonEncoder<Sam1EncoderResult, Sam1TritonOptions>
 
     override suspend fun encode(image: BufferedImage, options: Sam1TritonOptions): Sam1EncoderResult {
 
-        val maxEdgeSize = INPUT_SIZE.toInt()
+        val maxEdgeSize = Sam1Model.Encoder.INPUT_EDGE_SIZE.toInt()
         val (scaledWidth, scaledHeight) = scaleToMaxEdgeSize(image.width, image.height, maxEdgeSize)
         val scaledPaddedImg = scaleWithPadding(image, scaledWidth, scaledHeight, maxEdgeSize, maxEdgeSize)
 
@@ -45,21 +44,11 @@ class Sam1TritonEncoder : SamTritonEncoder<Sam1EncoderResult, Sam1TritonOptions>
 
         return Sam1EncoderResult(
             imageEmbedding = imageEmbedding,
-            imageWidth = scaledWidth,
-            imageHeight = scaledHeight
+            scaledWidth = scaledWidth,
+            scaledHeight = scaledHeight,
+            sourceWidth = image.width,
+            sourceHeight = image.height,
         )
     }
 
-    companion object {
-
-        const val INPUT_SIZE = 1024L
-
-        private enum class Inputs(override val parameter: String, override val shape: LongArray) : EncodeParameter {
-            IMAGE("image", longArrayOf(1L, 3L, INPUT_SIZE, INPUT_SIZE))
-        }
-
-        private enum class Outputs(override val parameter: String, override val shape: LongArray) : EncodeParameter {
-            IMAGE_EMBEDDINGS("image_embeddings", longArrayOf(1, 256, 64, 64))
-        }
-    }
 }

@@ -2,8 +2,14 @@ package org.janelia.saalfeldlab.samlink.decode
 
 import ai.onnxruntime.*
 import org.janelia.saalfeldlab.samlink.encode.Sam2EncoderResult
-import org.janelia.saalfeldlab.samlink.ORT_ENV
-import java.nio.IntBuffer
+import org.janelia.saalfeldlab.samlink.models.DecodeParameter.Companion.get
+import org.janelia.saalfeldlab.samlink.models.ModelParameter.Companion.set
+import org.janelia.saalfeldlab.samlink.models.Sam2Model.Decoder.Inputs
+import org.janelia.saalfeldlab.samlink.models.Sam2Model.Decoder.OUTPUT_EDGE_SIZE
+import org.janelia.saalfeldlab.samlink.models.Sam2Model
+import org.janelia.saalfeldlab.samlink.models.Sam2Model.Decoder.Inputs.IMAGE_EMBED
+import org.janelia.saalfeldlab.samlink.models.Sam2Model.Decoder.Inputs.MASK_INPUT
+import org.janelia.saalfeldlab.samlink.models.Sam2Model.Decoder.Inputs.ORIG_IM_SIZE
 
 /**
  * SAM2.1 decoder implementation.
@@ -31,63 +37,88 @@ class Sam2Decoder(
 
     override val supportsMaskRefinement = true
 
-    override fun decode(encoderResult: Sam2EncoderResult, prompt: SamPrompt): SamDecoder.DecoderResult {
+    override fun decode(encoderResult: Sam2EncoderResult, prompt: SamPrompt): DecoderResult {
         val owned = mutableListOf<OnnxTensor>()
         val inputs = mutableMapOf<String, OnnxTensor>()
-        inputs["image_embed"] = encoderResult.imageEmbedding
-        inputs["high_res_feats_0"] = encoderResult.highResFeats0
-        inputs["high_res_feats_1"] = encoderResult.highResFeats1
-        addPromptInputs(prompt, inputs, owned)
+        inputs[IMAGE_EMBED] = encoderResult.imageEmbedding
+        inputs[Sam2Model.Decoder.Inputs.HIGH_RES_FEATS_0] = encoderResult.highResFeats0
+        inputs[Sam2Model.Decoder.Inputs.HIGH_RES_FEATS_1] = encoderResult.highResFeats1
+
+        val promptInEncodeInput = prompt.scaleToEncodeInput(encoderResult)
+        addPromptInputs(promptInEncodeInput, inputs, owned)
         return runDecoder(inputs, owned)
     }
 
     private fun addPromptInputs(
-        prompt: SamPromptBase,
+        prompt: SamPrompt,
         inputs: MutableMap<String, OnnxTensor>,
         owned: MutableList<OnnxTensor>
     ) {
-        when (prompt) {
-            is PointPrompt -> SamDecoder.addPointInputs(listOf(prompt), inputs, owned)
-            is MaskPrompt -> SamDecoder.addMaskInputs(prompt.mask, inputs, owned = owned)
-            is SamPrompt -> {
-                val allPoints = mutableListOf<PointPrompt>()
-                var lastMask: FloatArray? = null
-                for (leaf in prompt.flatten()) {
-                    when (leaf) {
-                        is BoxPrompt -> allPoints.addAll(leaf.prompts.filterIsInstance<PointPrompt>())
-                        is PointPrompt -> allPoints.add(leaf)
-                        is MaskPrompt -> lastMask = leaf.mask
-                        else -> {}
-                    }
-                }
-                if (allPoints.isEmpty()) allPoints.add(PointPrompt(0f, 0f, SamPointLabel.PADDING))
-                SamDecoder.addPointInputs(allPoints, inputs, owned)
-                if (lastMask != null) SamDecoder.addMaskInputs(lastMask, inputs, owned = owned)
-                else SamDecoder.addEmptyMaskInputs(inputs, owned)
+        val points = mutableListOf<PointPrompt>()
+        var mask: MaskPrompt? = null
+        for (leaf in prompt.flatten()) {
+            when (leaf) {
+                is PointPrompt -> points += leaf
+                is BoxPrompt -> points += leaf.prompts.filterIsInstance<PointPrompt>()
+                is MaskPrompt -> mask = leaf
+                else -> {}
             }
+        }
+        if (points.isEmpty())
+            points += PointPrompt(0f, 0f, SamPointLabel.PADDING)
+
+        addPoints(points, inputs, owned)
+
+        val (maskPrompt, hasMask) = mask?.let { it to true } ?: (EMPTY_MASK_PROMPT to false)
+        addMask(maskPrompt, inputs, owned, hasMask)
+    }
+
+    private fun addMask(
+        prompt: MaskPrompt,
+        inputs: MutableMap<String, OnnxTensor>,
+        owned: MutableList<OnnxTensor>,
+        hasMask: Boolean = true
+    ) {
+
+        inputs[MASK_INPUT] = MASK_INPUT.allocateDirectTensor(prompt.mask).also {
+            owned += it
+        }
+
+        val hasMaskData = floatArrayOf(if (hasMask) 1f else 0f)
+        inputs[Inputs.HAS_MASK_INPUT] = Inputs.HAS_MASK_INPUT.wrapAsTensor(hasMaskData).also {
+            owned += it
         }
     }
 
-    private fun origImSizeInput(): OnnxTensor {
-        val desiredOutputSize = IntBuffer.wrap(intArrayOf(MASK_SIZE, MASK_SIZE))
-        return OnnxTensor.createTensor( ORT_ENV, desiredOutputSize, longArrayOf(2) )
+    private fun addPoints(
+        points: List<PointPrompt>,
+        inputs: MutableMap<String, OnnxTensor>,
+        owned: MutableList<OnnxTensor>
+    ) {
+
+        val (coords, labels) = Inputs.createPointTensors(points)
+        inputs[Inputs.POINT_COORDS] = coords.also { owned += it }
+        inputs[Inputs.POINT_LABELS] = labels.also { owned += it }
     }
 
-    private fun runDecoder(inputs: Map<String, OnnxTensor>, owned: List<OnnxTensor>): SamDecoder.DecoderResult {
+    private fun runDecoder(inputs: Map<String, OnnxTensor>, owned: MutableList<OnnxTensor>): DecoderResult {
         val allInputs = inputs.toMutableMap()
 
-        /* This determines the size of the output mask  */
-        val origImSize = origImSizeInput()
-        allInputs["orig_im_size"] = origImSize
+        /* This determines the size of the output mask. We don 't want the resizing, so we just ask
+        * for the output edge size   */
+        val sizeArray = intArrayOf(OUTPUT_EDGE_SIZE, OUTPUT_EDGE_SIZE)
+        allInputs[ORIG_IM_SIZE] = ORIG_IM_SIZE.wrapAsTensor(sizeArray).also {
+            owned += it
+        }
 
         val results = session.run(allInputs)
 
-        val masksResult = results.get("masks").get() as OnnxTensor
-        val iouResult = results.get("iou_predictions").get() as OnnxTensor
+        val masksResult = results[Sam2Model.Decoder.Outputs.MASKS]
+        val iouResult = results[Sam2Model.Decoder.Outputs.IOU_PREDICTIONS]
 
         val shape = masksResult.info.shape
         val numMasks = shape[1].toInt()
-        val numPixels = MASK_SIZE * MASK_SIZE
+        val numPixels = OUTPUT_EDGE_SIZE * OUTPUT_EDGE_SIZE
         val masks = masksResult.floatBuffer.array()
         val ious = iouResult.floatBuffer.array()
 
@@ -97,13 +128,12 @@ class Sam2Decoder(
         val allIous = FloatArray(numMasks) { ious[it] }
 
         owned.forEach { it.close() }
-        origImSize.close()
         results.close()
 
-        return SamDecoder.DecoderResult(
+        return DecoderResult(
             allMasks,
             allIous,
-            MASK_SIZE
+            OUTPUT_EDGE_SIZE
         )
     }
 
@@ -112,6 +142,7 @@ class Sam2Decoder(
     }
 
     companion object {
-        const val MASK_SIZE = 256
+
+        val EMPTY_MASK_PROMPT = MaskPrompt(FloatArray(OUTPUT_EDGE_SIZE * OUTPUT_EDGE_SIZE))
     }
 }
