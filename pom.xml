@@ -56,7 +56,7 @@
 
     <scm>
         <connection>scm:git:https://github.com/saalfeldlab/sam-link</connection>
-        <developerConnection>scm:git:git@github.com:scijava/sam-link</developerConnection>
+        <developerConnection>scm:git:git@github.com:saalfeldlab/sam-link</developerConnection>
         <tag>HEAD</tag>
         <url>https://github.com/saalfeldlab/sam-link</url>
     </scm>
@@ -71,6 +71,7 @@
 
 
     <properties>
+        <!-- License properties -->
         <license.licenseName>bsd_2</license.licenseName>
         <license.projectName>sam-link</license.projectName>
         <license.organizationName>Saalfeld Lab</license.organizationName>
@@ -78,11 +79,15 @@
         <license.skipUpdateLicense>true</license.skipUpdateLicense>
         <license.skipUpdateProjectLicense>true</license.skipUpdateProjectLicense>
 
-        <kotlin.version>2.3.0</kotlin.version>
+        <!-- Deploy to scijava -->
+        <releaseProfiles>sign,deploy-to-scijava</releaseProfiles>
+
         <scijava.jvm.version>21</scijava.jvm.version>
+        <kotlin.version>2.3.0</kotlin.version>
+        <junit-platform-launcher.version>1.13.4</junit-platform-launcher.version>
+
         <enforcer.skip>true</enforcer.skip>
         <javadoc.skip>true</javadoc.skip>
-        <junit-platform-launcher.version>1.13.4</junit-platform-launcher.version>
         <grpc-kotlin.version>1.4.3</grpc-kotlin.version>
         <surefire.version>3.5.2</surefire.version>
     </properties>

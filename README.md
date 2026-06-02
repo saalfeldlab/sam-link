@@ -1,3 +1,5 @@
+[![Build Status](https://github.com/saalfeldlab/sam-link/actions/workflows/build.yml/badge.svg)](https://github.com/saalfeldlab/sam-link/actions/workflows/build.yml)
+
 # SAM Link
 
 ### Segment Anything Kotlin Abstraction Layer
