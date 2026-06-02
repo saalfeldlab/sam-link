@@ -33,3 +33,49 @@ supported by [Sam3Decoder.kt](src/main/kotlin/org/janelia/saalfeldlab/samlink/de
 
 See [licenses_readme.md](src/main/resources/org/janelia/saalfeldlab/samlink/decode/licenses/licenses_readme.md) for 
 license information on the provided models. 
+
+## Example API Usage
+
+Encode against a Triton server, decode locally, threshold the logits at `0`, and write the binary
+mask to disk:
+
+```kotlin
+
+/* Any BufferedImage will do */
+val image = ImageIO.read(File("input.png"))
+
+/* Point the encoder to the server */
+val encoder = Sam2TritonEncoder(
+    host = "triton.local",
+    port = 8001,
+    model = "sam2.1_hiera_large_encoder"
+)
+val decoder = Sam2Decoder(DecoderModel.SAM2.load())
+
+encoder.use { enc -> 
+    decoder.use { dec -> 
+        runBlocking {
+            enc.encode(image).use { embedding ->
+            /* Adds a FOREGROUND point at the center of the image. */
+            val prompt = SamPrompt().addPoint(
+                image.width / 2f,
+                image.height / 2f,
+                SamPointLabel.FOREGROUND,
+            )
+            val result = dec.decode(embedding, prompt)
+
+            val mask = result.bestMask
+            val size = result.maskSize
+            val out = BufferedImage(size, size, BufferedImage.TYPE_BYTE_GRAY)
+            val pixels = (out.raster.dataBuffer as DataBufferByte).data
+            /* threshold the mask */
+            for (i in mask.indices) 
+                pixels[i] = if (mask[i] > 0f) 255.toByte() else 0
+                
+            ImageIO.write(out, "png", File("mask.png"))
+            }
+        }
+    } 
+}
+```
+
