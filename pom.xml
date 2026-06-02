@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
         <groupId>org.scijava</groupId>
         <artifactId>pom-scijava</artifactId>
         <version>44.0.0</version>
-        <relativePath />
+        <relativePath/>
     </parent>
 
     <groupId>org.janelia.saalfeldlab</groupId>
@@ -16,7 +16,68 @@
     <version>1.0.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
+    <name>sam-link</name>
+    <description>Bridge for SAM providers and JVM Applications </description>
+    <url>https://github.com/saalfeldlab/sam-link</url>
+    <inceptionYear>2026</inceptionYear>
+    <organization>
+        <name>Saalfeld Lab</name>
+        <url>https://www.janelia.org/lab/saalfeld-lab</url>
+    </organization>
+    <licenses>
+        <license>
+            <name>Simplified BSD License</name>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>Caleb Hulbert</name>
+            <roles>
+                <role>founder</role>
+                <role>lead</role>
+                <role>developer</role>
+                <role>debugger</role>
+                <role>reviewer</role>
+                <role>support</role>
+                <role>maintainer</role>
+            </roles>
+        </developer>
+    </developers>
+    <contributors>
+        <contributor>
+            <name>Caleb Hulbert</name>
+            <properties>
+                <id>cmhulbert</id>
+            </properties>
+        </contributor>
+    </contributors>
+
+    <scm>
+        <connection>scm:git:https://github.com/saalfeldlab/sam-link</connection>
+        <developerConnection>scm:git:git@github.com:scijava/sam-link</developerConnection>
+        <tag>HEAD</tag>
+        <url>https://github.com/saalfeldlab/sam-link</url>
+    </scm>
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/saalfeldlab/sam-link/issues</url>
+    </issueManagement>
+    <ciManagement>
+        <system>GitHub Actions</system>
+        <url>https://github.com/saalfeldlab/sam-link/actions</url>
+    </ciManagement>
+
+
     <properties>
+        <license.licenseName>bsd_2</license.licenseName>
+        <license.projectName>sam-link</license.projectName>
+        <license.organizationName>Saalfeld Lab</license.organizationName>
+        <license.copyrightOwners>Caleb Hulbert, Stephan Saalfeld</license.copyrightOwners>
+        <license.skipUpdateLicense>true</license.skipUpdateLicense>
+        <license.skipUpdateProjectLicense>true</license.skipUpdateProjectLicense>
+
         <kotlin.version>2.3.0</kotlin.version>
         <scijava.jvm.version>21</scijava.jvm.version>
         <enforcer.skip>true</enforcer.skip>
@@ -207,6 +268,51 @@
                 </executions>
             </plugin>
         </plugins>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>build-helper-maven-plugin</artifactId>
+                    <executions>
+                        <execution>
+                            <id>timestamp-property</id>
+                            <goals>
+                                <goal>timestamp-property</goal>
+                            </goals>
+                            <phase>validate</phase>
+                            <configuration>
+                                <name>current.year</name>
+                                <pattern>yyyy</pattern>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <artifactId>maven-resources-plugin</artifactId>
+                    <executions>
+                        <execution>
+                            <id>copy</id>
+                            <phase>compile</phase>
+                            <goals>
+                                <goal>copy-resources</goal>
+                            </goals>
+                            <configuration>
+                                <outputDirectory>${basedir}</outputDirectory>
+                                <resources>
+                                    <resource>
+                                        <directory>doc</directory>
+                                        <includes>
+                                            <include>*.md</include>
+                                        </includes>
+                                        <filtering>true</filtering>
+                                    </resource>
+                                </resources>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </pluginManagement>
     </build>
 
     <profiles>
