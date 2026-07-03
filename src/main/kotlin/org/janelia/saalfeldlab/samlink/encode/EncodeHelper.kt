@@ -3,8 +3,12 @@ package org.janelia.saalfeldlab.samlink.encode
 import com.google.protobuf.ByteString
 import com.google.protobuf.UnsafeByteOperations
 import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import javax.imageio.IIOImage
+import javax.imageio.ImageIO
+import javax.imageio.ImageWriteParam
 
 object EncodeHelper {
 
@@ -79,5 +83,37 @@ object EncodeHelper {
         }
 
         return UnsafeByteOperations.unsafeWrap(buffer)
+    }
+
+    /**
+     * Encode this image as a JPEG [ByteString] at the given [quality] in [0, 1].
+     * Unlike `ImageIO.write`, this sets an explicit quality; higher is larger and less lossy.
+     * Defaults to 0.75.
+     */
+    fun BufferedImage.toJpegByteString(quality: Float = 0.75f): ByteString {
+        val writer = ImageIO.getImageWritersByFormatName("jpeg").next()
+        val param = writer.defaultWriteParam.apply {
+            compressionMode = ImageWriteParam.MODE_EXPLICIT
+            compressionQuality = quality
+        }
+        val baos = ByteArrayOutputStream()
+        try {
+            ImageIO.createImageOutputStream(baos).use { ios ->
+                writer.output = ios
+                writer.write(null, IIOImage(this, null, null), param)
+            }
+        } finally {
+            writer.dispose()
+        }
+        return UnsafeByteOperations.unsafeWrap(baos.toByteArray())
+    }
+
+    /**
+     * Frame this as a single element of a Triton `BYTES` tensor for `rawInputContents`:
+     * a 4-byte little-endian length prefix followed by the element bytes.
+     */
+    fun ByteString.asTritonBytesElement(): ByteString {
+        val prefix = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(size()).array()
+        return UnsafeByteOperations.unsafeWrap(prefix).concat(this)
     }
 }

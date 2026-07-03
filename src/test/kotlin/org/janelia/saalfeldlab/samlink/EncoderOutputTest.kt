@@ -2,6 +2,8 @@ package org.janelia.saalfeldlab.samlink
 
 import kotlinx.coroutines.runBlocking
 import org.janelia.saalfeldlab.samlink.TestUtils.rectangleImage
+import org.janelia.saalfeldlab.samlink.encode.ImageEncoding
+import org.janelia.saalfeldlab.samlink.encode.Sam2TritonOptions
 import org.janelia.saalfeldlab.samlink.models.Sam1Model
 import org.janelia.saalfeldlab.samlink.models.Sam2Model
 import org.janelia.saalfeldlab.samlink.models.Sam3TrackerModel
@@ -28,10 +30,24 @@ class EncoderOutputTest {
 
     @Test
     fun `Sam 2`() = runBlocking {
-        TritonEnv.newSam2Encoder().use { encoder ->
+        TritonEnv.newSam2Encoder(ImageEncoding.RAW).use { encoder ->
             val edgeSize = Sam2Model.Encoder.INPUT_EDGE_SIZE.toInt()
             val image = rectangleImage(edgeSize, edgeSize)
             encoder.encode(image).use { result ->
+                assertContentEquals(longArrayOf(1, 256, 64, 64), result.imageEmbedding.info.shape)
+                assertContentEquals(longArrayOf(1, 32, 256, 256), result.highResFeats0.info.shape)
+                assertContentEquals(longArrayOf(1, 64, 128, 128), result.highResFeats1.info.shape)
+            }
+        }
+    }
+
+    @Test
+    fun `Sam 2 JPEG`() = runBlocking {
+        TritonEnv.newSam2Encoder(ImageEncoding.JPEG).use { encoder ->
+            val edgeSize = Sam2Model.Encoder.INPUT_EDGE_SIZE.toInt()
+            val image = rectangleImage(edgeSize, edgeSize)
+            val options = Sam2TritonOptions(imageEncoding = ImageEncoding.JPEG)
+            encoder.encode(image, options).use { result ->
                 assertContentEquals(longArrayOf(1, 256, 64, 64), result.imageEmbedding.info.shape)
                 assertContentEquals(longArrayOf(1, 32, 256, 256), result.highResFeats0.info.shape)
                 assertContentEquals(longArrayOf(1, 64, 128, 128), result.highResFeats1.info.shape)
