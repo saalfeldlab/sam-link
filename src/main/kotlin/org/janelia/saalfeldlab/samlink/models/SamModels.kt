@@ -85,6 +85,9 @@ object Sam2Model {
 
         internal enum class Inputs(override val parameter: String, override val shape: LongArray) : EncodeParameter {
             IMAGE("image", longArrayOf(1, 3, INPUT_EDGE_SIZE, INPUT_EDGE_SIZE)),
+
+            /** a single JPEG-encoded [INPUT_EDGE_SIZE]x[INPUT_EDGE_SIZE] image, sent as a BYTES tensor */
+            JPEG_IMAGE("encoded_image", longArrayOf(1)),
         }
 
         internal enum class Outputs(override val parameter: String, override val shape: LongArray) : EncodeParameter {

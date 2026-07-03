@@ -2,9 +2,12 @@ package org.janelia.saalfeldlab.samlink.encode.triton
 
 import inference.inferParameter
 import org.janelia.saalfeldlab.samlink.TritonClient
+import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.asTritonBytesElement
 import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.intRGBtoCHW
 import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.scaleToMaxEdgeSize
 import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.scaleWithPadding
+import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.toJpegByteString
+import org.janelia.saalfeldlab.samlink.encode.ImageEncoding
 import org.janelia.saalfeldlab.samlink.models.EncodeParameter.Companion.getAsTensor
 import org.janelia.saalfeldlab.samlink.encode.Sam2EncoderResult
 import org.janelia.saalfeldlab.samlink.models.Sam2Model
@@ -28,7 +31,7 @@ class Sam2TritonEncoder : SamTritonEncoder<Sam2EncoderResult, Sam2TritonOptions>
         responseTimeout
     )
 
-    override fun options(): Sam2TritonOptions = Sam2TritonOptions()
+    override fun options(): Sam2TritonOptions = Sam2TritonOptions(ImageEncoding.RAW)
 
     override suspend fun encode(image: BufferedImage, options: Sam2TritonOptions): Sam2EncoderResult {
 
@@ -47,14 +50,21 @@ class Sam2TritonEncoder : SamTritonEncoder<Sam2EncoderResult, Sam2TritonOptions>
         )
 
 
-        val inputs = listOf(
-            TritonClient.InferenceInput(
+        val input = when (options.imageEncoding) {
+            ImageEncoding.RAW -> TritonClient.InferenceInput(
                 name = Inputs.IMAGE.parameter,
                 shape = Inputs.IMAGE.shape,
                 datatype = "FP32",
                 data = scaledPaddedImg.intRGBtoCHW()
-            ),
-        )
+            )
+            ImageEncoding.JPEG -> TritonClient.InferenceInput(
+                name = Inputs.JPEG_IMAGE.parameter,
+                shape = Inputs.JPEG_IMAGE.shape,
+                datatype = "BYTES",
+                data = scaledPaddedImg.toJpegByteString(options.quality).asTritonBytesElement()
+            )
+        }
+        val inputs = listOf(input)
 
 
         val params = mapOf("priority" to inferParameter { int64Param = options.priority })
