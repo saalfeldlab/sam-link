@@ -3,6 +3,7 @@ package org.janelia.saalfeldlab.samlink
 import org.janelia.saalfeldlab.samlink.decode.DecoderResult
 import org.janelia.saalfeldlab.samlink.decode.SamPointLabel
 import org.janelia.saalfeldlab.samlink.decode.SamPrompt
+import org.janelia.saalfeldlab.samlink.encode.EncodeOptions
 import org.janelia.saalfeldlab.samlink.encode.EncoderResult
 import org.janelia.saalfeldlab.samlink.encode.SamEncoder
 import java.awt.Color
@@ -96,16 +97,17 @@ object TestUtils {
     }
 }
 
-suspend fun <T : EncoderResult> testSquareWithBorder(
+suspend fun <T : EncoderResult, O : EncodeOptions> testSquareWithBorder(
     width: Int, height: Int,
     decodedImageEdge: Int = 256,
     borderPercent: Double = .25,
-    encoder: SamEncoder<T, *>,
+    encoder: SamEncoder<T, O>,
     decode: ((T, SamPrompt) -> DecoderResult)?,
+    options: O? = null,
 ) {
     val image = TestUtils.rectangleImage(width, height, borderPercent = borderPercent)
-    encoder.encode(image).use { encodeResult ->
-        /* Prompts are now in source-image pixel space; decoders apply the encoder's transform. */
+    encoder.encode(image, options ?: encoder.options()).use { encodeResult ->
+        /* Prompts in source-image pixel space; decoders apply the encoder's transform. */
         val prompt = rectangleTestPrompt(width, height, borderPercent)
         decode?.let {
 
