@@ -1,10 +1,6 @@
 package org.janelia.saalfeldlab.samlink.encode.triton
 
-import org.janelia.saalfeldlab.samlink.InferenceInput
 import org.janelia.saalfeldlab.samlink.TritonClient
-import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.asTritonBytesElement
-import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.toJpegByteString
-import org.janelia.saalfeldlab.samlink.encode.ImageEncoding
 import org.janelia.saalfeldlab.samlink.encode.Normalization
 import org.janelia.saalfeldlab.samlink.encode.Sam2EncoderResult
 import org.janelia.saalfeldlab.samlink.encode.Sam2TritonOptions
@@ -32,23 +28,15 @@ class Sam2TritonEncoder : SamTritonEncoder<Sam2EncoderResult, Sam2TritonOptions>
 
     override val inputEdgeSize = Sam2Model.Encoder.INPUT_EDGE_SIZE
     override val rawInput: EncodeParameter = Inputs.IMAGE
+    override val jpegInput: EncodeParameter = Inputs.JPEG_IMAGE
     override val normalization = Normalization.IMAGENET
 
-    override fun options(): Sam2TritonOptions = Sam2TritonOptions(ImageEncoding.RAW)
+    override fun options(): Sam2TritonOptions = Sam2TritonOptions()
 
     override suspend fun encode(image: BufferedImage, options: Sam2TritonOptions): Sam2EncoderResult {
 
         val fitted = fitImage(image)
-        val input = when (options.imageEncoding) {
-            ImageEncoding.RAW -> rawInputFor(fitted)
-            ImageEncoding.JPEG -> InferenceInput(
-                name = Inputs.JPEG_IMAGE.parameter,
-                shape = Inputs.JPEG_IMAGE.shape,
-                datatype = "BYTES",
-                data = fitted.image.toJpegByteString(options.quality).asTritonBytesElement()
-            )
-        }
-        val response = infer(input, options)
+        val response = infer(inputFor(fitted, options), options)
 
         return Sam2EncoderResult(
             imageEmbedding = response.getAsTensor(Outputs.IMAGE_EMBED),

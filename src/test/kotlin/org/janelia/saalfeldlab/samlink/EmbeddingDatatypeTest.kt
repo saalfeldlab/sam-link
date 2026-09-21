@@ -5,7 +5,6 @@ import kotlinx.coroutines.runBlocking
 import org.janelia.saalfeldlab.samlink.TestUtils.rectangleImage
 import org.janelia.saalfeldlab.samlink.decode.DecoderModel
 import org.janelia.saalfeldlab.samlink.decode.Sam2Decoder
-import org.janelia.saalfeldlab.samlink.encode.ImageEncoding
 import org.janelia.saalfeldlab.samlink.models.Sam2Model
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
@@ -29,7 +28,7 @@ class EmbeddingDatatypeTest {
         val image = rectangleImage(edgeSize, edgeSize)
         val prompt = rectangleTestPrompt(edgeSize, edgeSize, borderPercent = 0.25)
 
-        TritonEnv.newSam2Encoder(ImageEncoding.RAW).use { encoder ->
+        TritonEnv.newSam2Encoder().use { encoder ->
             encoder.encode(image).use { result ->
                 assertEquals(OnnxJavaType.FLOAT, result.imageEmbedding.info.type, "endpoint returns fp32 today")
 

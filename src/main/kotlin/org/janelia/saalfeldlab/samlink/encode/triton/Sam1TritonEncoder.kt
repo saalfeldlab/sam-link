@@ -23,6 +23,7 @@ class Sam1TritonEncoder : SamTritonEncoder<Sam1EncoderResult, Sam1TritonOptions>
 
     override val inputEdgeSize = Sam1Model.Encoder.INPUT_EDGE_SIZE
     override val rawInput: EncodeParameter = Inputs.IMAGE
+    override val jpegInput: EncodeParameter = Inputs.JPEG_IMAGE
     override val normalization = Normalization.IMAGENET
 
     override fun options(): Sam1TritonOptions = Sam1TritonOptions()
@@ -30,7 +31,7 @@ class Sam1TritonEncoder : SamTritonEncoder<Sam1EncoderResult, Sam1TritonOptions>
     override suspend fun encode(image: BufferedImage, options: Sam1TritonOptions): Sam1EncoderResult {
 
         val fitted = fitImage(image)
-        val response = infer(rawInputFor(fitted), options)
+        val response = infer(inputFor(fitted, options), options)
 
         return Sam1EncoderResult(
             imageEmbedding = response.getAsTensor(Outputs.IMAGE_EMBEDDINGS),

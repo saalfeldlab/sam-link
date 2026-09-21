@@ -6,7 +6,9 @@ import org.janelia.saalfeldlab.samlink.decode.Sam1Decoder
 import org.janelia.saalfeldlab.samlink.decode.Sam2Decoder
 import org.janelia.saalfeldlab.samlink.decode.Sam3TrackerDecoder
 import org.janelia.saalfeldlab.samlink.encode.ImageEncoding
+import org.janelia.saalfeldlab.samlink.encode.Sam1TritonOptions
 import org.janelia.saalfeldlab.samlink.encode.Sam2TritonOptions
+import org.janelia.saalfeldlab.samlink.encode.Sam3TrackerTritonOptions
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -44,7 +46,7 @@ class EndToEndTest {
     @ParameterizedTest
     @EnumSource(ImageDimensions::class)
     fun `Sam 2 Raw`(imageDims: ImageDimensions) = runBlocking {
-        val encoder = TritonEnv.newSam2Encoder(ImageEncoding.RAW)
+        val encoder = TritonEnv.newSam2Encoder()
         val decoder = Sam2Decoder(DecoderModel.SAM2.load())
 
         testSquareWithBorder(
@@ -58,7 +60,7 @@ class EndToEndTest {
 
     @Test
     fun `Sam 2 JPEG`() = runBlocking {
-        val encoder = TritonEnv.newSam2Encoder(ImageEncoding.JPEG)
+        val encoder = TritonEnv.newSam2Encoder()
         val decoder = Sam2Decoder(DecoderModel.SAM2.load())
 
         /* the client always pads to a 1024x1024 input before encoding, so the JPEG
@@ -70,6 +72,37 @@ class EndToEndTest {
             encoder = encoder,
             decode = decoder::decode,
             options = Sam2TritonOptions(imageEncoding = ImageEncoding.JPEG),
+        )
+    }
+
+    @Test
+    fun `Sam 1 JPEG`() = runBlocking {
+        val encoder = TritonEnv.newSam1Encoder()
+        val decoder = Sam1Decoder(DecoderModel.SAM1.load())
+
+        testSquareWithBorder(
+            width = ImageDimensions.SQUARE.width,
+            height = ImageDimensions.SQUARE.height,
+            borderPercent = 0.25,
+            encoder = encoder,
+            decode = decoder::decode,
+            options = Sam1TritonOptions(imageEncoding = ImageEncoding.JPEG),
+        )
+    }
+
+    @Test
+    fun `Sam 3 JPEG`() = runBlocking {
+        val encoder = TritonEnv.newSam3TrackerEncoder()
+        val decoder = Sam3TrackerDecoder(DecoderModel.SAM3_TRACKER_FP16.load())
+
+        testSquareWithBorder(
+            width = ImageDimensions.SAM3_SQUARE.width,
+            height = ImageDimensions.SAM3_SQUARE.height,
+            decodedImageEdge = 288,
+            borderPercent = 0.25,
+            encoder = encoder,
+            decode = decoder::decode,
+            options = Sam3TrackerTritonOptions(imageEncoding = ImageEncoding.JPEG),
         )
     }
 

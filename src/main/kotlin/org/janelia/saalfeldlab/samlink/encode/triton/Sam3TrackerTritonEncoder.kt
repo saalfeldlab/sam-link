@@ -23,6 +23,7 @@ class Sam3TrackerTritonEncoder : SamTritonEncoder<Sam3TrackerEncoderResult, Sam3
 
     override val inputEdgeSize = Sam3TrackerModel.Encoder.INPUT_EDGE_SIZE
     override val rawInput: EncodeParameter = Inputs.PIXEL_VALUES
+    override val jpegInput: EncodeParameter = Inputs.JPEG_IMAGE
     override val normalization = Normalization.SYMMETRIC
 
     override fun options(): Sam3TrackerTritonOptions = Sam3TrackerTritonOptions()
@@ -30,7 +31,7 @@ class Sam3TrackerTritonEncoder : SamTritonEncoder<Sam3TrackerEncoderResult, Sam3
     override suspend fun encode(image: BufferedImage, options: Sam3TrackerTritonOptions): Sam3TrackerEncoderResult {
 
         val fitted = fitImage(image)
-        val response = infer(rawInputFor(fitted), options)
+        val response = infer(inputFor(fitted, options), options)
 
         return Sam3TrackerEncoderResult(
             imageEmbeddings0 = response.getAsTensor(Outputs.IMAGE_EMBED_0),

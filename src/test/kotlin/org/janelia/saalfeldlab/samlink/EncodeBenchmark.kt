@@ -9,6 +9,7 @@ import org.janelia.saalfeldlab.samlink.decode.DecoderModel.SAM1
 import org.janelia.saalfeldlab.samlink.decode.DecoderModel.SAM2
 import org.janelia.saalfeldlab.samlink.decode.DecoderModel.SAM3_TRACKER_FP16
 import org.janelia.saalfeldlab.samlink.encode.ImageEncoding
+import org.janelia.saalfeldlab.samlink.encode.Sam2TritonOptions
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
@@ -50,7 +51,7 @@ class EncodeBenchmark {
     @ParameterizedTest
     @EnumSource(BenchmarkType::class)
     fun `Sam 2 Raw`(type: BenchmarkType) = runBlocking {
-        val encoder = TritonEnv.newSam2Encoder(ImageEncoding.RAW)
+        val encoder = TritonEnv.newSam2Encoder()
         val model = SAM2
 
         val time = benchmark(type, type.count) {
@@ -70,7 +71,7 @@ class EncodeBenchmark {
     @ParameterizedTest
     @EnumSource(BenchmarkType::class)
     fun `Sam 2 Jpeg`(type: BenchmarkType) = runBlocking {
-        val encoder = TritonEnv.newSam2Encoder(ImageEncoding.JPEG)
+        val encoder = TritonEnv.newSam2Encoder()
         val model = SAM2
 
         val time = benchmark(type, type.count) {
@@ -80,7 +81,8 @@ class EncodeBenchmark {
                     height = SQUARE.height,
                     borderPercent = 0.25,
                     encoder = encoder,
-                    decode = null
+                    decode = null,
+                    options = Sam2TritonOptions(imageEncoding = ImageEncoding.JPEG)
                 )
             }
         }
