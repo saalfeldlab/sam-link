@@ -45,7 +45,7 @@ object TritonEnv {
             val hostAsString = host()
             URI.create(hostAsString).host ?: hostAsString
         }.getOrElse { host() }
-        return TritonClient(host = name, port = port())
+        return UnaryTritonClient(host = name, port = port())
     }
 
     fun newSam1Encoder() = Sam1TritonEncoder(host(), port(), sam1Model(), responseTimeoutMs)

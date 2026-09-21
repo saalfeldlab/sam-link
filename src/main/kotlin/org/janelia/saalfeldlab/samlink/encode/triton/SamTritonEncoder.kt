@@ -1,6 +1,7 @@
 package org.janelia.saalfeldlab.samlink.encode.triton
 
 import org.janelia.saalfeldlab.samlink.TritonClient
+import org.janelia.saalfeldlab.samlink.UnaryTritonClient
 import org.janelia.saalfeldlab.samlink.encode.EncoderResult
 import org.janelia.saalfeldlab.samlink.encode.SamEncoder
 import org.janelia.saalfeldlab.samlink.encode.TritonEncodeOptions
@@ -26,7 +27,7 @@ abstract class SamTritonEncoder<R : EncoderResult, O : TritonEncodeOptions> : Sa
         port: Int = 8001,
         model: String,
         responseTimeout: Long = 30_000
-    ) : this(TritonClient(host, port), model) {
+    ) : this(UnaryTritonClient(host, port), model) {
         this.responseTimeout = responseTimeout
     }
 

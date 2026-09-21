@@ -1,6 +1,7 @@
 package org.janelia.saalfeldlab.samlink.encode.triton
 
 import inference.inferParameter
+import org.janelia.saalfeldlab.samlink.InferenceInput
 import org.janelia.saalfeldlab.samlink.TritonClient
 import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.asTritonBytesElement
 import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.intRGBtoCHW
@@ -51,13 +52,13 @@ class Sam2TritonEncoder : SamTritonEncoder<Sam2EncoderResult, Sam2TritonOptions>
 
 
         val input = when (options.imageEncoding) {
-            ImageEncoding.RAW -> TritonClient.InferenceInput(
+            ImageEncoding.RAW -> InferenceInput(
                 name = Inputs.IMAGE.parameter,
                 shape = Inputs.IMAGE.shape,
                 datatype = "FP32",
                 data = scaledPaddedImg.intRGBtoCHW()
             )
-            ImageEncoding.JPEG -> TritonClient.InferenceInput(
+            ImageEncoding.JPEG -> InferenceInput(
                 name = Inputs.JPEG_IMAGE.parameter,
                 shape = Inputs.JPEG_IMAGE.shape,
                 datatype = "BYTES",

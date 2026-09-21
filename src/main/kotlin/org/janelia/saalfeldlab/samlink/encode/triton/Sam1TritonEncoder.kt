@@ -1,5 +1,6 @@
 package org.janelia.saalfeldlab.samlink.encode.triton
 
+import org.janelia.saalfeldlab.samlink.InferenceInput
 import org.janelia.saalfeldlab.samlink.TritonClient
 import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.intRGBtoCHW
 import org.janelia.saalfeldlab.samlink.encode.EncodeHelper.scaleToMaxEdgeSize
@@ -31,7 +32,7 @@ class Sam1TritonEncoder : SamTritonEncoder<Sam1EncoderResult, Sam1TritonOptions>
         val scaledPaddedImg = scaleWithPadding(image, scaledWidth, scaledHeight, maxEdgeSize, maxEdgeSize)
 
         val inputs = listOf(
-            TritonClient.InferenceInput(
+            InferenceInput(
                 name = Inputs.IMAGE.parameter,
                 datatype = "FP32",
                 shape = Inputs.IMAGE.shape,

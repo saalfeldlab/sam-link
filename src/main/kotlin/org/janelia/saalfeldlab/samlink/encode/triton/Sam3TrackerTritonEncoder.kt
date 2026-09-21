@@ -3,6 +3,7 @@ package org.janelia.saalfeldlab.samlink.encode.triton
 import org.janelia.saalfeldlab.samlink.models.Sam3TrackerModel
 import org.janelia.saalfeldlab.samlink.models.Sam3TrackerModel.Encoder.Inputs
 import org.janelia.saalfeldlab.samlink.models.Sam3TrackerModel.Encoder.Outputs
+import org.janelia.saalfeldlab.samlink.InferenceInput
 import org.janelia.saalfeldlab.samlink.TritonClient
 import org.janelia.saalfeldlab.samlink.models.EncodeParameter.Companion.getAsTensor
 import org.janelia.saalfeldlab.samlink.encode.Sam3TrackerEncoderResult
@@ -45,7 +46,7 @@ class Sam3TrackerTritonEncoder : SamTritonEncoder<Sam3TrackerEncoderResult, Sam3
         val imageData = scaledPaddedImg.intRGBtoCHW(outputRange = -1f..1f)
 
         val inputs = listOf(
-            TritonClient.InferenceInput(
+            InferenceInput(
                 name = Inputs.PIXEL_VALUES.parameter,
                 shape = Inputs.PIXEL_VALUES.shape,
                 datatype = "FP32",
