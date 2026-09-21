@@ -35,10 +35,11 @@ object EncodeHelper {
     /**
      * Scale [image] to a resulting [java.awt.image.BufferedImage] of the [targetWidth]×[targetHeight].
      * Maintains the aspect ratio and pads with black to fit the target dimensions.
-     * If [image] dimensions match the target dimensions this will return the original image.
+     * If [image] matches the target dimensions and is [BufferedImage.TYPE_INT_RGB] this will return
+     * the original image; any other type is redrawn, since [intRGBtoCHW] reads packed int pixels.
      */
     fun scaleWithPadding(image: BufferedImage, contentWidth: Int, contentHeight: Int, targetWidth: Int, targetHeight: Int): BufferedImage {
-        if (image.width == targetWidth && image.height == targetHeight)
+        if (image.width == targetWidth && image.height == targetHeight && image.type == BufferedImage.TYPE_INT_RGB)
             return image
 
         return BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB).apply {
@@ -49,33 +50,34 @@ object EncodeHelper {
     }
 
     /**
-     * Convert a [BufferedImage] to a [com.google.protobuf.ByteString] in channel-height-width format (CHW).
+     * Convert a [BufferedImage] to a [com.google.protobuf.ByteString] in channel-height-width format (CHW),
+     * applying [normalization] per channel.
      * Assumes input is [BufferedImage.TYPE_INT_RGB].
-     *
-     * Maps RGB values from [0,255] to [outputRange]
-     *
-     * @param outputRange range to normalize pixel values to, default is [0f, 1f]
      */
-    fun BufferedImage.intRGBtoCHW(outputRange : ClosedFloatingPointRange<Float> = 0f..1f): ByteString {
+    fun BufferedImage.intRGBtoCHW(normalization: Normalization): ByteString {
         val dataBuffer = raster.dataBuffer
         val numPixels = width * height
         val rgbCount = 3 * numPixels
         val buffer = ByteBuffer.allocate(rgbCount * 4).order(ByteOrder.LITTLE_ENDIAN)
         val floatView = buffer.asFloatBuffer()
 
-        val rgbRange = 255f
-        val scale = (outputRange.endInclusive - outputRange.start) / rgbRange
-        val offset = outputRange.start
+        val (mean, std) = normalization.mean to normalization.std
+        val redScale = 1f / (255f * std[0])
+        val greenScale = 1f / (255f * std[1])
+        val blueScale = 1f / (255f * std[2])
+        val redOffset = -mean[0] / std[0]
+        val greenOffset = -mean[1] / std[1]
+        val blueOffset = -mean[2] / std[2]
 
-        /* reorder to channel-height-width format and normalize to output range*/
+        /* reorder to channel-height-width format and normalize */
         repeat(numPixels) { redIdx ->
             val greenIdx = redIdx + numPixels
             val blueIdx = redIdx + numPixels * 2
 
             val rgbInt = dataBuffer.getElem(redIdx)
-            val red = ((rgbInt shr 16) and 0xFF) * scale + offset
-            val green = ((rgbInt shr 8) and 0xFF) * scale + offset
-            val blue = (rgbInt and 0xFF) * scale + offset
+            val red = ((rgbInt shr 16) and 0xFF) * redScale + redOffset
+            val green = ((rgbInt shr 8) and 0xFF) * greenScale + greenOffset
+            val blue = (rgbInt and 0xFF) * blueScale + blueOffset
 
             floatView.put(redIdx, red)
             floatView.put(greenIdx, green)
