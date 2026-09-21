@@ -1,5 +1,9 @@
 package org.janelia.saalfeldlab.samlink.decode
 
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtSession
+import ai.onnxruntime.TensorInfo
+import org.janelia.saalfeldlab.samlink.asType
 import org.janelia.saalfeldlab.samlink.encode.EncoderResult
 import org.janelia.saalfeldlab.samlink.encode.Sam1EncoderResult
 import org.janelia.saalfeldlab.samlink.encode.Sam2EncoderResult
@@ -21,6 +25,18 @@ sealed interface SamDecoder<E : EncoderResult> : AutoCloseable {
     val supportsMaskRefinement: Boolean get() = false
 
     companion object {
+
+        /**
+         * [tensor] as the datatype this session declares for input [name].
+         *
+         * The endpoint's datatype and the decoder's need not agree; an fp16 response feeds an fp32
+         * decoder, and only the pairing that differs pays for a conversion. A conversion allocates, so
+         * it goes in [owned] to be closed with the rest.
+         */
+        fun OrtSession.asDeclaredType(name: String, tensor: OnnxTensor, owned: MutableList<OnnxTensor>): OnnxTensor {
+            val declared = (inputInfo.getValue(name).info as TensorInfo).type
+            return tensor.asType(declared).also { if (it !== tensor) owned += it }
+        }
 
         /** Convert binary mask to logits;    */
         fun binaryToLogits(mask: FloatArray): FloatArray {

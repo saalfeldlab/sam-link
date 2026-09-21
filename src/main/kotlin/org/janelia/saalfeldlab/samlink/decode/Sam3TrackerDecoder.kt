@@ -6,6 +6,7 @@ import org.janelia.saalfeldlab.samlink.models.DecodeParameter.Companion.get
 import org.janelia.saalfeldlab.samlink.models.ModelParameter.Companion.set
 import org.janelia.saalfeldlab.samlink.models.Sam3TrackerModel.Decoder
 import org.janelia.saalfeldlab.samlink.models.Sam3TrackerModel.Decoder.Inputs
+import org.janelia.saalfeldlab.samlink.decode.SamDecoder.Companion.asDeclaredType
 
 /**
  * SAM3 Tracker decoder implementation.
@@ -33,9 +34,11 @@ class Sam3TrackerDecoder(
     override fun decode(encoderResult: Sam3TrackerEncoderResult, prompt: SamPrompt): DecoderResult {
         val owned = mutableListOf<OnnxTensor>()
         val inputs = mutableMapOf<String, OnnxTensor>()
-        inputs[Inputs.IMAGE_EMBED_0] = encoderResult.imageEmbeddings0
-        inputs[Inputs.IMAGE_EMBED_1] = encoderResult.imageEmbeddings1
-        inputs[Inputs.IMAGE_EMBED_2] = encoderResult.imageEmbeddings2
+        for ((parameter, embedding) in listOf(
+            Inputs.IMAGE_EMBED_0 to encoderResult.imageEmbeddings0,
+            Inputs.IMAGE_EMBED_1 to encoderResult.imageEmbeddings1,
+            Inputs.IMAGE_EMBED_2 to encoderResult.imageEmbeddings2,
+        )) inputs[parameter] = session.asDeclaredType(parameter.parameter, embedding, owned)
 
         val encodeInputPrompt = prompt.scaleToEncodeInput(encoderResult)
 
