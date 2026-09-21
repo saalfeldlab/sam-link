@@ -107,6 +107,22 @@ class EndToEndTest {
     }
 
     @ParameterizedTest
+    @EnumSource(ImageEncoding::class)
+    fun `Sam 2 fp16`(encoding: ImageEncoding) = runBlocking {
+        val encoder = TritonEnv.newSam2Encoder()
+        val decoder = Sam2Decoder(DecoderModel.SAM2.load())
+
+        testSquareWithBorder(
+            width = ImageDimensions.SQUARE.width,
+            height = ImageDimensions.SQUARE.height,
+            borderPercent = 0.25,
+            encoder = encoder,
+            decode = decoder::decode,
+            options = Sam2TritonOptions(imageEncoding = encoding, requestFp16 = true),
+        )
+    }
+
+    @ParameterizedTest
     @EnumSource(ImageDimensions::class)
     fun `Sam 3`(imageDims: ImageDimensions) = runBlocking {
         val encoder = TritonEnv.newSam3TrackerEncoder()

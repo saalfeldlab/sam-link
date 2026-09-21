@@ -90,7 +90,11 @@ abstract class SamTritonEncoder<R : EncoderResult, O : TritonEncodeOptions> : Sa
     }
 
     internal suspend fun infer(input: InferenceInput, options: TritonEncodeOptions): GrpcService.ModelInferResponse {
-        val params = mapOf("priority" to inferParameter { int64Param = options.priority })
+        val params = buildMap {
+            put("priority", inferParameter { int64Param = options.priority })
+            if (options.requestFp16)
+                put("request_fp16", inferParameter { boolParam = true })
+        }
         return client.infer(model, listOf(input), params)
     }
 

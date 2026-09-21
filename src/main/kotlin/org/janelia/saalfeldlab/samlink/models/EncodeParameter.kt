@@ -34,16 +34,25 @@ interface EncodeParameter : ModelParameter {
         /**
          * Get output tensor by name as a float array.
          *
+         * Half precision is widened here. To keep it use [getAsTensor], which preserves whatever the
+         * endpoint sent.
+         *
          * Throws IllegalArgumentException if output [name] is not in the response.
          */
         fun GrpcService.ModelInferResponse.getFloatArray(name: String) =
             (outputsList zip rawOutputContentsList)
                 .firstOrNull { (output, _) -> output.name == name }
                 ?.let { (output, content) ->
-                    check(output.datatype != "FP16") { "FP16 datatype is not currently supported" }
-
                     val buffer = content.asReadOnlyByteBuffer().order(ByteOrder.LITTLE_ENDIAN)
-                    FloatArray(buffer.remaining() / 4).also { buffer.asFloatBuffer().get(it) }
+                    when (val datatype = output.datatype) {
+                        "FP32" -> FloatArray(buffer.remaining() / 4).also { buffer.asFloatBuffer().get(it) }
+                        "FP16" -> buffer.asShortBuffer().let { halves ->
+                            FloatArray(halves.remaining()) { java.lang.Float.float16ToFloat(halves.get(it)) }
+                        }
+                        else -> throw IllegalArgumentException(
+                            "Unsupported datatype '$datatype' for output '$name'"
+                        )
+                    }
                 }
                 ?: throw IllegalArgumentException("Missing output '$name' in inference response")
     }
