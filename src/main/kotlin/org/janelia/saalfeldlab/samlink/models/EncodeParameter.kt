@@ -1,7 +1,9 @@
 package org.janelia.saalfeldlab.samlink.models
 
+import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.OnnxTensor
 import inference.GrpcService
+import java.lang.Float
 import java.nio.ByteOrder
 
 interface EncodeParameter : ModelParameter {
@@ -23,7 +25,10 @@ interface EncodeParameter : ModelParameter {
             return when (val datatype = output.datatype) {
                 "FP32" -> encodeParam.allocateDirectTensor(getFloatArray(name))
                 "FP16" -> encodeParam.allocateDirectHalfTensor(
-                    content.asReadOnlyByteBuffer().order(ByteOrder.LITTLE_ENDIAN)
+                    content.asReadOnlyByteBuffer().order(ByteOrder.LITTLE_ENDIAN), OnnxJavaType.FLOAT16
+                )
+                "BF16" -> encodeParam.allocateDirectHalfTensor(
+                    content.asReadOnlyByteBuffer().order(ByteOrder.LITTLE_ENDIAN), OnnxJavaType.BFLOAT16
                 )
                 else -> throw IllegalArgumentException(
                     "Unsupported datatype '$datatype' for output '$name'"
@@ -47,7 +52,12 @@ interface EncodeParameter : ModelParameter {
                     when (val datatype = output.datatype) {
                         "FP32" -> FloatArray(buffer.remaining() / 4).also { buffer.asFloatBuffer().get(it) }
                         "FP16" -> buffer.asShortBuffer().let { halves ->
-                            FloatArray(halves.remaining()) { java.lang.Float.float16ToFloat(halves.get(it)) }
+                            FloatArray(halves.remaining()) { Float.float16ToFloat(halves.get(it)) }
+                        }
+                        "BF16" -> buffer.asShortBuffer().let { halves ->
+                            FloatArray(halves.remaining()) {
+                                Float.intBitsToFloat(halves.get(it).toInt() shl 16)
+                            }
                         }
                         else -> throw IllegalArgumentException(
                             "Unsupported datatype '$datatype' for output '$name'"

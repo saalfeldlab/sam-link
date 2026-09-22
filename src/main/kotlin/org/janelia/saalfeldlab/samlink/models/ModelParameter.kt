@@ -30,14 +30,18 @@ interface ModelParameter {
     /**
      * Create a half precision OnnxTensor from the wire bytes, without widening.
      *
-     * [bytes] holds the little endian fp16 payload exactly as the server sent it, so this is a bulk
-     * copy rather than a per element conversion.
+     * [bytes] holds the little endian fp16 or bf16 payload exactly as the server sent it, so this is
+     * a bulk copy rather than a per element conversion.
      */
-    fun allocateDirectHalfTensor(bytes: ByteBuffer, shape: LongArray = this.shape): OnnxTensor {
+    fun allocateDirectHalfTensor(
+        bytes: ByteBuffer,
+        type: OnnxJavaType = OnnxJavaType.FLOAT16,
+        shape: LongArray = this.shape
+    ): OnnxTensor {
         val directBuffer = ByteBuffer.allocateDirect(bytes.remaining()).order(ByteOrder.nativeOrder())
         directBuffer.put(bytes.duplicate())
         directBuffer.position(0)
-        return OnnxTensor.createTensor(ORT_ENV, directBuffer.asShortBuffer(), shape, OnnxJavaType.FLOAT16)
+        return OnnxTensor.createTensor(ORT_ENV, directBuffer.asShortBuffer(), shape, type)
     }
 
     /** Wrap a FloatArray as an OnnxTensor */
