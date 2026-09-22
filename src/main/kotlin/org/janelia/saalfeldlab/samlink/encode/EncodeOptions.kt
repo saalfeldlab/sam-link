@@ -15,6 +15,8 @@ sealed interface EncodeOptions
 enum class ImageEncoding { RAW, JPEG }
 
 /**
+ * @property priority the endpoint's queue level; 1 is served before 2, and 2 is the default. The
+ *   endpoints configure two levels, and a value outside that range queues behind both of them.
  * @property imageEncoding how the image is sent to the server; see [ImageEncoding]
  * @property quality JPEG quality in [0, 1]; ignored by [ImageEncoding.RAW]
  * @property requestFp16 ask the endpoint for half precision.
@@ -27,21 +29,21 @@ abstract class TritonEncodeOptions(
 ) : EncodeOptions
 
 class Sam1TritonOptions(
-    priority: Long = 5,
+    priority: Long = 2,
     imageEncoding: ImageEncoding = ImageEncoding.RAW,
     quality: Float = 0.75f,
     requestFp16: Boolean = true,
 ) : TritonEncodeOptions(priority, imageEncoding, quality, requestFp16)
 
 class Sam2TritonOptions(
-    priority: Long = 5,
+    priority: Long = 2,
     imageEncoding: ImageEncoding = ImageEncoding.RAW,
     quality: Float = 0.75f,
     requestFp16: Boolean = true,
 ) : TritonEncodeOptions(priority, imageEncoding, quality, requestFp16)
 
 class Sam3TrackerTritonOptions(
-    priority: Long = 5,
+    priority: Long = 2,
     imageEncoding: ImageEncoding = ImageEncoding.RAW,
     quality: Float = 0.75f,
     requestFp16: Boolean = true,

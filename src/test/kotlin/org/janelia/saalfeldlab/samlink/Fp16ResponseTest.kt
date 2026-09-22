@@ -51,7 +51,7 @@ class Fp16ResponseTest {
             val halfPrecision = client.infer(
                 encoder.model,
                 listOf(input),
-                mapOf("request_fp16" to inferParameter { boolParam = true })
+                params = mapOf("request_fp16" to inferParameter { boolParam = true })
             )
 
             for (name in encoder.outputs) {

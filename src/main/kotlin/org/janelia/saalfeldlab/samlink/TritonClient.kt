@@ -11,10 +11,15 @@ interface TritonClient : AutoCloseable {
 
     suspend fun isModelReady(modelName: String, modelVersion: String = ""): Boolean
 
-    /** Submit one inference; the server returns every output the model declares */
+    /**
+     * Submit one inference; the server returns every output the model declares.
+     *
+     * [priority] is the endpoint's queue level, 1 or 2, default 2.
+     */
     suspend fun infer(
         model: String,
         inferInputs: List<InferenceInput>,
+        priority: Long = 2,
         params: Map<String, GrpcService.InferParameter> = emptyMap(),
     ): GrpcService.ModelInferResponse
 }

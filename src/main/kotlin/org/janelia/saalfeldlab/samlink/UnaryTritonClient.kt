@@ -2,7 +2,6 @@ package org.janelia.saalfeldlab.samlink
 
 import inference.GRPCInferenceServiceGrpcKt
 import inference.GrpcService
-import inference.ModelInferRequestKt
 import inference.ModelInferRequestKt.inferInputTensor
 import inference.inferParameter
 import inference.modelInferRequest
@@ -28,13 +27,15 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Triton client that issues one unary `ModelInfer` RPC per request.
  *
- * At most [callsPerConnection] responses are in flight on one socket, and excess callers wait here
- * rather than on the wire. Large responses sharing a socket interleave and land together at the end
- * of a batch; one at a time keeps delivery first-come-first-served.
+ * At most [callsPerConnection] responses are in flight on one socket. Default of `1` since our
+ * packet sizes are expected to be quite large; this stops messages from interleaving and blocking
+ * each other.
  *
- * A failed call fails its own caller and nothing else, and [timeoutMs] is a real per-call deadline.
- * Cancelling the caller aborts the RPC, and the server discards whatever is still queued; a request
- * already executing runs to completion regardless.
+ * Number of [reservedConnections] that wait for priority 1 requests.
+ *
+ * [timeoutMs] is a per-call timeout.
+ *
+ * Requests are cancellable
  */
 class UnaryTritonClient(
     val host: String,
@@ -42,8 +43,9 @@ class UnaryTritonClient(
     override var timeoutMs: Long = 0,
     val useTls: Boolean = port == 443,
     val compression: String? = "gzip",
-    val connectionCount: Int = 4,
+    val connectionCount: Int = 5,
     val callsPerConnection: Int = 1,
+    val reservedConnections: Int = 1,
 ) : TritonClient {
 
     private val lock = Any()
@@ -53,12 +55,22 @@ class UnaryTritonClient(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("UnaryTritonClient"))
 
     private val connections: List<Connection>
+
+    /** the reserved connections for priority 1*/
+    private val reserved: List<Connection>
+    private val shared: List<Connection>
+
     private val nextSlot = AtomicInteger()
 
     init {
         require(connectionCount >= 1) { "connectionCount must be >= 1, got $connectionCount" }
         require(callsPerConnection >= 1) { "callsPerConnection must be >= 1, got $callsPerConnection" }
+        require(reservedConnections in 0 until connectionCount) {
+            "reservedConnections must leave at least one shared connection, got $reservedConnections of $connectionCount"
+        }
         connections = List(connectionCount) { Connection(buildChannel(), callsPerConnection) }
+        reserved = connections.take(reservedConnections)
+        shared = connections.drop(reservedConnections)
         scope.launch { hintOrtEnvInit() }
     }
 
@@ -73,11 +85,16 @@ class UnaryTritonClient(
         return channel to eventLoop
     }
 
-    private fun pickSlot() = (nextSlot.getAndIncrement() and Int.MAX_VALUE) % connections.size
+    private fun pickSlot(size: Int) = (nextSlot.getAndIncrement() and Int.MAX_VALUE) % size
 
-    /** prefer a connection with nothing in flight; otherwise wait on the next one round-robin */
-    private suspend fun <T> onConnection(block: suspend (ManagedChannel) -> T): T {
+    /**
+     * Prefer a connection with nothing in flight; otherwise wait on the next one round-robin.
+     *
+     * Priority 1 uses reserved connections first and falls back to the shared pool
+     */
+    private suspend fun <T> onConnection(priority: Long, block: suspend (ManagedChannel) -> T): T {
         check(!closed) { "UnaryTritonClient is closed" }
+        val connections = if (priority <= HIGH_PRIORITY) reserved + shared else shared
         for (connection in connections) {
             if (connection.permits.tryAcquire()) {
                 try {
@@ -87,7 +104,7 @@ class UnaryTritonClient(
                 }
             }
         }
-        val connection = connections[pickSlot()]
+        val connection = connections[pickSlot(connections.size)]
         return connection.permits.withPermit { block(connection.channel) }
     }
 
@@ -107,12 +124,13 @@ class UnaryTritonClient(
     override suspend fun infer(
         model: String,
         inferInputs: List<InferenceInput>,
+        priority: Long,
         params: Map<String, GrpcService.InferParameter>,
     ): GrpcService.ModelInferResponse {
         val request = modelInferRequest {
             modelName = model
             id = UUID.randomUUID().toString()
-            priority(5)
+            parameters["priority"] = inferParameter { int64Param = priority }
             parameters.putAll(params)
             for (input in inferInputs) {
                 inputs += inferInputTensor {
@@ -123,11 +141,7 @@ class UnaryTritonClient(
                 rawInputContents += input.data
             }
         }
-        return onConnection { channel -> stub(channel).modelInfer(request) }
-    }
-
-    private fun ModelInferRequestKt.Dsl.priority(priority: Long) {
-        parameters["priority"] = inferParameter { int64Param = priority }
+        return onConnection(priority) { channel -> stub(channel).modelInfer(request) }
     }
 
     private fun stub(channel: ManagedChannel): GRPCInferenceServiceGrpcKt.GRPCInferenceServiceCoroutineStub {
@@ -156,6 +170,7 @@ class UnaryTritonClient(
     }
 
     companion object {
+        private const val HIGH_PRIORITY = 1L
         private const val BYTES_MB = 1024 * 1024
         private val LOG = KotlinLogging.logger { }
     }
