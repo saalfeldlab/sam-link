@@ -107,9 +107,9 @@ class Sam2Decoder(
     private fun runDecoder(inputs: Map<String, OnnxTensor>, owned: MutableList<OnnxTensor>): DecoderResult {
         val allInputs = inputs.toMutableMap()
 
-        /* This determines the size of the output mask. We don 't want the resizing, so we just ask
-        * for the output edge size   */
-        val sizeArray = intArrayOf(OUTPUT_EDGE_SIZE, OUTPUT_EDGE_SIZE)
+        /* This determines the size of the output mask. We don't want the resizing, so we just ask
+        * for the output edge size */
+        val sizeArray = longArrayOf(OUTPUT_EDGE_SIZE.toLong(), OUTPUT_EDGE_SIZE.toLong())
         allInputs[ORIG_IM_SIZE] = ORIG_IM_SIZE.wrapAsTensor(sizeArray).also {
             owned += it
         }

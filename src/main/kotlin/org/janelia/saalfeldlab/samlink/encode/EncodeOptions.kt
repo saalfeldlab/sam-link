@@ -30,19 +30,19 @@ class Sam1TritonOptions(
     priority: Long = 5,
     imageEncoding: ImageEncoding = ImageEncoding.RAW,
     quality: Float = 0.75f,
-    requestFp16: Boolean = false,
+    requestFp16: Boolean = true,
 ) : TritonEncodeOptions(priority, imageEncoding, quality, requestFp16)
 
 class Sam2TritonOptions(
     priority: Long = 5,
     imageEncoding: ImageEncoding = ImageEncoding.RAW,
     quality: Float = 0.75f,
-    requestFp16: Boolean = false,
+    requestFp16: Boolean = true,
 ) : TritonEncodeOptions(priority, imageEncoding, quality, requestFp16)
 
 class Sam3TrackerTritonOptions(
     priority: Long = 5,
     imageEncoding: ImageEncoding = ImageEncoding.RAW,
     quality: Float = 0.75f,
-    requestFp16: Boolean = false,
+    requestFp16: Boolean = true,
 ) : TritonEncodeOptions(priority, imageEncoding, quality, requestFp16)
