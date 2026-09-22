@@ -14,6 +14,7 @@ import io.grpc.netty.shaded.io.netty.channel.socket.nio.NioSocketChannel
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
@@ -141,7 +142,9 @@ class UnaryTritonClient(
                 rawInputContents += input.data
             }
         }
-        return onConnection(priority) { channel -> stub(channel).modelInfer(request) }
+        return withContext(Dispatchers.IO) {
+            onConnection(priority) { channel -> stub(channel).modelInfer(request) }
+        }
     }
 
     private fun stub(channel: ManagedChannel): GRPCInferenceServiceGrpcKt.GRPCInferenceServiceCoroutineStub {
