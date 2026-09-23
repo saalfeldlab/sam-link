@@ -9,6 +9,7 @@ import org.janelia.saalfeldlab.samlink.models.Sam1Model
 import org.janelia.saalfeldlab.samlink.models.Sam1Model.Decoder.Inputs
 import org.janelia.saalfeldlab.samlink.models.Sam1Model.Decoder.OUTPUT_EDGE_SIZE
 import org.janelia.saalfeldlab.samlink.models.Sam1Model.Decoder.Outputs
+import org.janelia.saalfeldlab.samlink.decode.SamDecoder.Companion.asDeclaredType
 
 /**
  * SAM1 decoder implementation backed by onnx model.
@@ -21,7 +22,8 @@ class Sam1Decoder(private val session: OrtSession) : SamDecoder<Sam1EncoderResul
         val owned = mutableListOf<OnnxTensor>()
         val inputs = mutableMapOf<String, OnnxTensor>()
 
-        inputs[Inputs.IMAGE_EMBEDDINGS.parameter] = encoderResult.imageEmbedding
+        inputs[Inputs.IMAGE_EMBEDDINGS.parameter] =
+            session.asDeclaredType(Inputs.IMAGE_EMBEDDINGS.parameter, encoderResult.imageEmbedding, owned)
         inputs[Inputs.ORIG_IM_SIZE.parameter] =
             Inputs.ORIG_IM_SIZE.allocateDirectTensor(floatArrayOf(1024f, 1024f)).also { owned += it }
 

@@ -10,6 +10,7 @@ import org.janelia.saalfeldlab.samlink.models.Sam2Model
 import org.janelia.saalfeldlab.samlink.models.Sam2Model.Decoder.Inputs.IMAGE_EMBED
 import org.janelia.saalfeldlab.samlink.models.Sam2Model.Decoder.Inputs.MASK_INPUT
 import org.janelia.saalfeldlab.samlink.models.Sam2Model.Decoder.Inputs.ORIG_IM_SIZE
+import org.janelia.saalfeldlab.samlink.decode.SamDecoder.Companion.asDeclaredType
 
 /**
  * SAM2.1 decoder implementation.
@@ -40,9 +41,11 @@ class Sam2Decoder(
     override fun decode(encoderResult: Sam2EncoderResult, prompt: SamPrompt): DecoderResult {
         val owned = mutableListOf<OnnxTensor>()
         val inputs = mutableMapOf<String, OnnxTensor>()
-        inputs[IMAGE_EMBED] = encoderResult.imageEmbedding
-        inputs[Sam2Model.Decoder.Inputs.HIGH_RES_FEATS_0] = encoderResult.highResFeats0
-        inputs[Sam2Model.Decoder.Inputs.HIGH_RES_FEATS_1] = encoderResult.highResFeats1
+        inputs[IMAGE_EMBED] = session.asDeclaredType(IMAGE_EMBED.parameter, encoderResult.imageEmbedding, owned)
+        for ((parameter, embedding) in listOf(
+            Sam2Model.Decoder.Inputs.HIGH_RES_FEATS_0 to encoderResult.highResFeats0,
+            Sam2Model.Decoder.Inputs.HIGH_RES_FEATS_1 to encoderResult.highResFeats1,
+        )) inputs[parameter] = session.asDeclaredType(parameter.parameter, embedding, owned)
 
         val promptInEncodeInput = prompt.scaleToEncodeInput(encoderResult)
         addPromptInputs(promptInEncodeInput, inputs, owned)
@@ -104,9 +107,9 @@ class Sam2Decoder(
     private fun runDecoder(inputs: Map<String, OnnxTensor>, owned: MutableList<OnnxTensor>): DecoderResult {
         val allInputs = inputs.toMutableMap()
 
-        /* This determines the size of the output mask. We don 't want the resizing, so we just ask
-        * for the output edge size   */
-        val sizeArray = intArrayOf(OUTPUT_EDGE_SIZE, OUTPUT_EDGE_SIZE)
+        /* This determines the size of the output mask. We don't want the resizing, so we just ask
+        * for the output edge size */
+        val sizeArray = longArrayOf(OUTPUT_EDGE_SIZE.toLong(), OUTPUT_EDGE_SIZE.toLong())
         allInputs[ORIG_IM_SIZE] = ORIG_IM_SIZE.wrapAsTensor(sizeArray).also {
             owned += it
         }
